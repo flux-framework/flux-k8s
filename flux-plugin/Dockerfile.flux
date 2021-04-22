@@ -84,9 +84,6 @@ WORKDIR /root/flux-sched/
 ENV PATH "/root/flux-install/bin:$PATH"
 ENV LD_LIBRARY_PATH "/root/flux-install/lib/flux:/root/flux-install/lib"
 RUN flux keygen
-COPY writers  /root/flux-sched/resource/writers
-COPY bindings /root/flux-sched/resource/hlapi/bindings 
-# COPY reapi_cli_impl.hpp /root/flux-sched/resource/hlapi/bindings/c++/reapi_cli_impl.hpp
 RUN ./autogen.sh && PYTHON_VERSION=3.8 ./configure --prefix=/root/flux-install && make -j && make install
 # Install go 15
 WORKDIR /home
@@ -102,13 +99,10 @@ RUN cp -r /root/flux-sched/resource/hlapi/bindings/go/src/fluxcli /go/src/ && cd
 RUN cd /go/src && GOOS=linux CGO_CFLAGS="-I/root/flux-sched/resource/hlapi/bindings/c -I/root/flux-install/include" CGO_LDFLAGS="-L/root/flux-sched/resource/hlapi/bindings/c/.libs -lreapi_cli  -L/root/flux-sched/resource/.libs -lresource -lstdc++ -lczmq -ljansson -lhwloc -lboost_system -L/root/flux-install/lib -lflux-hostlist -lboost_graph -lyaml-cpp" go install -v fluxcli
 RUN cp /root/flux-sched/t/scripts/flux-ion-resource.py /root/flux-install/libexec/flux/cmd/
 
-# # ENV GOPATH "/root/flux-sched/resource/hlapi/bindings/go:/go"
-# RUN ls /go/src
+
 WORKDIR /go/src/sigs.k8s.io/scheduler-plugins
 COPY cmd cmd/
 COPY hack hack/
-# COPY kep kep/
-# COPY manifests manifests/
 COPY pkg  pkg/
 COPY scheduler-plugins scheduler-plugins/
 COPY test test/
@@ -118,27 +112,11 @@ COPY go.sum .
 COPY Makefile .
 ARG ARCH
 ARG RELEASE_VERSION
-# # ENV GOPATH "/go"
 ENV BUILDENVVAR CGO_CFLAGS="-I/root/flux-sched/resource/hlapi/bindings/c -I/root/flux-install/include" CGO_LDFLAGS="-L/root/flux-sched/resource/hlapi/bindings/c/.libs -lreapi_cli  -L/root/flux-sched/resource/.libs -lresource -lstdc++ -lczmq -ljansson -lhwloc -lboost_system -L/root/flux-install/lib -lflux-hostlist -lboost_graph -lyaml-cpp"
 
 RUN RELEASE_VERSION=${RELEASE_VERSION} make build-scheduler.$ARCH && mv bin/kube-scheduler /bin/
 WORKDIR /bin
 RUN mkdir -p /home/data/jgf/
 RUN mkdir -p /home/data/jobspecs/
-# RUN rm -rf /go/src/sigs.k8s.io/scheduler-plugins/test
 
-# # ARG ARCH
-# FROM golang:1.15
-
-# RUN apt-get update && apt-get install -y rsync
-
-# # RUN apk add --no-cache --virtual .build-deps bash gcc musl-dev openssl git
-# # RUN apk update && apk add  --no-cache gcc libc-dev make git bash
-
-
-# COPY --from=basegoflux /go/src/sigs.k8s.io/scheduler-plugins/bin/kube-scheduler /bin/kube-scheduler
-# ENV LD_LIBRARY_PATH "/usr/lib64:/usr/local/lib:/usr/lib/x86_64-linux-gnu/:$LD_LIBRARY_PATH"
-# COPY testgraph.json /home/data/jgf/
-# COPY yamlexample.yaml /home/data/jobspecs/
-# WORKDIR /bin
 # CMD ["kube-scheduler"]
