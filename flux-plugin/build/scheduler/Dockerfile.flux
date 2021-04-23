@@ -104,9 +104,7 @@ WORKDIR /go/src/sigs.k8s.io/scheduler-plugins
 COPY cmd cmd/
 COPY hack hack/
 COPY pkg  pkg/
-COPY scheduler-plugins scheduler-plugins/
 COPY test test/
-COPY vendor vendor/ 
 COPY go.mod .
 COPY go.sum .
 COPY Makefile .
@@ -119,4 +117,4 @@ WORKDIR /bin
 RUN mkdir -p /home/data/jgf/
 RUN mkdir -p /home/data/jobspecs/
 
-# CMD ["kube-scheduler"]
+CMD ["kube-scheduler"]
