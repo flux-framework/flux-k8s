@@ -16,13 +16,13 @@ limitations under the License.
 package jobspec
 
 import (
+	// "errors"
 	"fmt"
+	"gopkg.in/yaml.v2"
+	v1 "k8s.io/api/core/v1"
 	"log"
 	"math"
 	"os"
-
-	"gopkg.in/yaml.v2"
-	v1 "k8s.io/api/core/v1"
 )
 
 type PodRequest struct {
@@ -56,9 +56,7 @@ func InspectPodInfo(pod *v1.Pod) *PodRequest {
 		} else {
 			pr.CPU[i] = specRequests.Cpu().Value()
 		}
-		if specRequests.Memory().Value() == 0 {
-			pr.Memory[i] = 10000
-		} else {
+		if specRequests.Memory().Value() > 0 {
 			pr.Memory[i] = specRequests.Memory().Value()
 		}
 		gpu := specLimits["nvidia.com/gpu"]
@@ -87,13 +85,16 @@ Ps: &pb.PodSpec{
 		},
 */
 
-func CreateJobSpecYaml(pr *PodRequest) (filename string) {
+func CreateJobSpecYaml(pr *PodRequest, filename string) error {
 	for i := 0; i < len(pr.Containers); i++ {
-		socket_resources := make([]Resource, 2)
+		socket_resources := make([]Resource, 1)
 		command := pr.Containers[i].Command
 		fmt.Printf("[JobSpec] Required memory %v/%v\n", pr.Memory[i], toGB(pr.Memory[i]))
 		socket_resources[0] = Resource{Type: "core", Count: pr.CPU[i]}
-		socket_resources[1] = Resource{Type: "memory", Count: pr.Memory[i]}
+		if pr.Memory[i] > 0 {
+			socket_resources = append(socket_resources, Resource{Type: "memory", Count: pr.Memory[i]})
+		}
+
 		if pr.Gpu[i] > 0 {
 			socket_resources = append(socket_resources, Resource{Type: "gpu", Count: pr.Gpu[i]})
 		}
@@ -140,26 +141,29 @@ func CreateJobSpecYaml(pr *PodRequest) (filename string) {
 		yamlbytes, err := yaml.Marshal(&js)
 		if err != nil {
 			log.Fatalf("[JobSpec] yaml.Marshal failed with '%s'\n", err)
+			return err
 		}
 		fmt.Printf("[JobSpec] JobSpec in YAML:\n%s\n", string(yamlbytes))
-		filename = "yamlexample.yaml"
 		f, err := os.Create(filename)
 		if err != nil {
 			log.Fatalf("[JobSpec] Couldn't create yaml file!!\n")
+			return err
 		}
 		defer f.Close()
 
 		_, err = f.Write(yamlbytes)
 		if err != nil {
 			log.Fatalf("[JobSpec] Couldn't write yaml file!!\n")
+			return err
 		}
 
 		_, err = f.WriteString("\n")
 		if err != nil {
 			log.Fatalf("[JobSpec] Couldn't write yaml file!!\n")
+			return err
 		}
 	}
-	return filename
+	return nil
 }
 
 func toGB(bytes int64) int64 {
