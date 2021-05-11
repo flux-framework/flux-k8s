@@ -8,17 +8,12 @@ profiles:
 - schedulerName: default-scheduler
 - schedulerName: scheduling-plugin
   plugins:
-    reserve:
-      enabled:
-      - name: KubeFlux
+    score:
+      disabled:
+      - name: '*'
     preFilter:
       enabled:
       - name: KubeFlux
-    postFilter:
-      enabled:
-      - name: KubeFlux
-      disabled:
-      - name: DefaultPreemption
-    permit:
+    filter:
       enabled:
       - name: KubeFlux

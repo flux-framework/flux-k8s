@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"k8s.io/klog/v2"
-	"time"
 
 	"fluxcli"
 	"k8s.io/api/core/v1"
@@ -38,11 +37,8 @@ type KubeFlux struct {
 	fluxctx *fluxcli.ReapiCtx
 }
 
-var _ framework.ReservePlugin = &KubeFlux{}
 var _ framework.PreFilterPlugin = &KubeFlux{}
-var _ framework.PostFilterPlugin = &KubeFlux{}
-
-var _ framework.PermitPlugin = &KubeFlux{}
+var _ framework.FilterPlugin = &KubeFlux{}
 
 // let's give it a name
 const (
@@ -53,6 +49,17 @@ func (kf *KubeFlux) Name() string {
 	return Name
 }
 
+type fluxStateData struct {
+	nodeName string
+}
+
+func (s *fluxStateData) Clone() framework.StateData {
+	clone := &fluxStateData{
+		nodeName: s.nodeName,
+	}
+	return clone
+}
+
 func (kf *KubeFlux) PreFilter(ctx context.Context, state *framework.CycleState, pod *v1.Pod) *framework.Status {
 	klog.Infof("Examining the pod")
 
@@ -60,34 +67,33 @@ func (kf *KubeFlux) PreFilter(ctx context.Context, state *framework.CycleState, 
 	filename := "/home/data/jobspecs/jobspec.yaml"
 	jobspec.CreateJobSpecYaml(fluxjbs, filename)
 
-	/*spec, err := ioutil.ReadFile(filename)
-	if err != nil {
-		err := fmt.Errorf("Error reading jobspec file")
-		return framework.NewStatus(framework.Unschedulable, err.Error())
-	}
-
-	reserved, allocated, at, overhead, jobid, fluxerr := fluxcli.ReapiCliMatchAllocate(kf.fluxctx, false, string(spec))
-	if fluxerr != 0 {
-		err := fmt.Errorf("Error in ReapiCliMatchAllocate")
-		return framework.NewStatus(framework.Unschedulable, err.Error())
-	}
-	printOutput(reserved, allocated, at, overhead, jobid, fluxerr)*/
-
-	err := fmt.Errorf("Sending the pod to post filter phase")
-	return framework.NewStatus(framework.Unschedulable, err.Error())
-
-	//return framework.NewStatus(framework.Success, "")
-}
-
-func (kf *KubeFlux) PostFilter(ctx context.Context, state *framework.CycleState, pod *v1.Pod, m framework.NodeToStatusMap) (*framework.PostFilterResult, *framework.Status) {
 	nodename, err := kf.askFlux(ctx, pod)
 	if err != nil {
-		return &framework.PostFilterResult{}, framework.NewStatus(framework.Unschedulable,
-			fmt.Sprintf("Pod %v is unschedulable by Flux", pod.Name))
-
+		fmt.Sprintf("Pod %v is unschedulable by Flux", pod.Name)
+		return framework.NewStatus(framework.Unschedulable, err.Error())
 	}
 	fmt.Println("Node Selected: ", nodename)
-	return &framework.PostFilterResult{NominatedNodeName: nodename}, framework.NewStatus(framework.Success)
+
+	state.Write(framework.StateKey(pod.Name), &fluxStateData{nodeName: nodename})
+
+	return framework.NewStatus(framework.Success, "")
+}
+
+func (kf *KubeFlux) Filter(ctx context.Context, cycleState *framework.CycleState, pod *v1.Pod, nodeInfo *framework.NodeInfo) *framework.Status {
+	fmt.Println("Filtering input node ", nodeInfo.Node().Name)
+	if v, e := cycleState.Read(framework.StateKey(pod.Name)); e == nil {
+		if value, ok := v.(*fluxStateData); ok && value.nodeName != nodeInfo.Node().Name {
+			return framework.NewStatus(framework.Unschedulable, "pod is not permitted")
+		} else {
+			fmt.Println("Filter: node selected by Flux ", value.nodeName)
+		}
+	}
+
+	return framework.NewStatus(framework.Success)
+}
+
+func (kf *KubeFlux) PreFilterExtensions() framework.PreFilterExtensions {
+	return nil
 }
 
 func (kf *KubeFlux) askFlux(ctx context.Context, pod *v1.Pod) (string, error) {
@@ -108,34 +114,7 @@ func (kf *KubeFlux) askFlux(ctx context.Context, pod *v1.Pod) (string, error) {
 	nodename := fluxcli.ReapiCliGetNode(kf.fluxctx)
 	fmt.Println("nodename ", nodename)
 
-	// waitingPod := kf.handle.GetWaitingPod(pod.UID)
-
-	// waitingPod.Allow(kf.Name())
-
 	return nodename, nil
-}
-
-func (kf *KubeFlux) Permit(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) (*framework.Status, time.Duration) {
-
-	kf.handle.IterateOverWaitingPods(func(waitingPod framework.WaitingPod) {
-		fmt.Println("Permit allows the pod ", waitingPod.GetPod())
-		waitingPod.Allow(kf.Name())
-	})
-	fmt.Println("Permit allows the pod: %v")
-	return framework.NewStatus(framework.Success, ""), 0
-}
-
-func (kf *KubeFlux) PreFilterExtensions() framework.PreFilterExtensions {
-	return nil
-}
-
-func (kf *KubeFlux) Reserve(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) *framework.Status {
-	fmt.Println("Reserving pod ", pod.Name)
-
-	return framework.NewStatus(framework.Success, "")
-}
-func (kf *KubeFlux) Unreserve(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) {
-	fmt.Println("Unreserve pod ", pod.Name)
 }
 
 // initialize and return a new Flux Plugin
@@ -148,6 +127,7 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 		return nil, err
 	}
 
+	// filename = "/home/data/jgf/tiny.json"
 	jgf, err := ioutil.ReadFile(filename)
 	if err != nil {
 		fmt.Println("Error reading JGF")
@@ -160,12 +140,6 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 		return nil, errors.New("Error while initializing ReapiCli")
 	}
 	klog.Infof("KubeFlux starts")
-
-	// jobspec, err := ioutil.ReadFile("/home/data/jobspecs/yamlexample.yaml")
-	// if err != nil {
-	// 	fmt.Println("Error reading jobspec")
-	// 	return nil, err
-	// }
 
 	return &KubeFlux{handle: handle, fluxctx: fctx}, nil
 }
