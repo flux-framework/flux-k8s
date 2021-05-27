@@ -18,11 +18,14 @@ package jobspec
 import (
 	// "errors"
 	"fmt"
-	"gopkg.in/yaml.v2"
-	v1 "k8s.io/api/core/v1"
 	"log"
 	"math"
 	"os"
+
+	"strconv"
+
+	"gopkg.in/yaml.v2"
+	v1 "k8s.io/api/core/v1"
 )
 
 type PodRequest struct {
@@ -33,6 +36,7 @@ type PodRequest struct {
 	Memory     []int64
 	Gpu        []int64
 	Storage    []int64
+	Labels     map[string]string
 }
 
 func InspectPodInfo(pod *v1.Pod) *PodRequest {
@@ -45,6 +49,8 @@ func InspectPodInfo(pod *v1.Pod) *PodRequest {
 	pr.Memory = make([]int64, numcontainers)
 	pr.Gpu = make([]int64, numcontainers)
 	pr.Storage = make([]int64, numcontainers)
+	fmt.Println("[JobSpec] pod labels ", pod.Labels)
+	pr.Labels = pod.Labels
 
 	for i, cont := range pr.Containers {
 		// fmt.Printf("[FML] \n%v\n", cont)
@@ -91,6 +97,14 @@ func CreateJobSpecYaml(pr *PodRequest, filename string) error {
 		command := pr.Containers[i].Command
 		fmt.Printf("[JobSpec] Required memory %v/%v\n", pr.Memory[i], toGB(pr.Memory[i]))
 		socket_resources[0] = Resource{Type: "core", Count: pr.CPU[i]}
+		if len(pr.Labels) > 0 {
+			r := make([]Resource, 0)
+			for key, val := range pr.Labels {
+				count, _ := strconv.Atoi(val)
+				r = append(r, Resource{Type: key, Count: int64(count)})
+			}
+			socket_resources[0].With = r
+		}
 		if pr.Memory[i] > 0 {
 			socket_resources = append(socket_resources, Resource{Type: "memory", Count: pr.Memory[i]})
 		}

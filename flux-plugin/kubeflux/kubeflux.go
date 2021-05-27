@@ -188,9 +188,10 @@ func createJGF(handle framework.Handle, filename string) error {
 
 		for index := 0; index < int(totalcpu); index++ {
 			// MakeCore(index int, name string)
-			core := fluxgraph.MakeCore(index, "core", &node.Labels)
+			core := fluxgraph.MakeCore(index, "core")
 			fluxgraph.MakeEdge(socket, core, "contains")
 			fluxgraph.MakeEdge(core, socket, "in")
+			fluxgraph.MakeNFDProperties(core, index, "cpu-", &node.Labels)
 		}
 
 		//  MakeMemory(index int, name string, unit string, size int
