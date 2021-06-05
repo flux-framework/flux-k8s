@@ -22,7 +22,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"k8s.io/klog/v2"
-
+	"time"
+	"k8s.io/kubernetes/pkg/scheduler/metrics"
 	"fluxcli"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -104,13 +105,15 @@ func (kf *KubeFlux) askFlux(ctx context.Context, pod *v1.Pod) (string, error) {
 		// err := fmt.Errorf("Error reading jobspec file")
 		return "", errors.New("Error reading jobspec")
 	}
-
-	reserved, allocated, at, overhead, jobid, fluxerr := fluxcli.ReapiCliMatchAllocate(kf.fluxctx, false, string(spec))
+	start := time.Now() 
+	reserved, allocated, at, pre, post, overhead, jobid, fluxerr := fluxcli.ReapiCliMatchAllocate(kf.fluxctx, false, string(spec))
+	elapsed := metrics.SinceInSeconds(start)
+	fmt.Println("Time elapsed: ", elapsed)
 	if fluxerr != 0 {
 		// err := fmt.Errorf("Error in ReapiCliMatchAllocate")
 		return "", errors.New("Error in ReapiCliMatchAllocate")
 	}
-	printOutput(reserved, allocated, at, overhead, jobid, fluxerr)
+	printOutput(reserved, allocated, at, pre, post, overhead, jobid, fluxerr)
 	nodename := fluxcli.ReapiCliGetNode(kf.fluxctx)
 	fmt.Println("nodename ", nodename)
 
@@ -121,19 +124,17 @@ func (kf *KubeFlux) askFlux(ctx context.Context, pod *v1.Pod) (string, error) {
 func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 	fctx := fluxcli.NewReapiCli()
 	fmt.Println("Created cli context ", fctx)
-	filename := "/home/data/jgf/singlenode.json"
+	filename := "/home/data/jgf/kubecluster.json"
 	err := createJGF(handle, filename)
 	if err != nil {
 		return nil, err
 	}
 
-	// filename = "/home/data/jgf/tiny.json"
 	jgf, err := ioutil.ReadFile(filename)
 	if err != nil {
 		fmt.Println("Error reading JGF")
 		return nil, err
 	}
-	// fmt.Println("JGF ", string(jgf))
 	ret := fluxcli.ReapiCliInit(fctx, string(jgf))
 	if ret != 0 {
 		fmt.Println("Error while initializing ReapiCli")
@@ -145,9 +146,9 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 }
 
 ////// Utility functions
-func printOutput(reserved bool, allocated string, at int64, overhead float64, jobid uint64, fluxerr int) {
+func printOutput(reserved bool, allocated string, at int64, pre uint32, post uint32, overhead float64, jobid uint64, fluxerr int) {
 	fmt.Println("\n\t----Match Allocate output---")
-	fmt.Printf("jobid: %d\nreserved: %t\nallocated: %s\nat: %d\noverhead: %f\nerror: %d\n", jobid, reserved, allocated, at, overhead, fluxerr)
+	fmt.Printf("jobid: %d\nreserved: %t\nallocated: %s\nat: %d\npreorder visit count: %d\npostorder visit count: %d\noverhead: %f\nerror: %d\n", jobid, reserved, allocated, at, pre, post, overhead, fluxerr)
 }
 
 func createJGF(handle framework.Handle, filename string) error {
@@ -162,21 +163,24 @@ func createJGF(handle framework.Handle, filename string) error {
 	fluxgraph.MakeEdge(cluster, rack, "contains")
 	fluxgraph.MakeEdge(rack, cluster, "in")
 
-	fmt.Println("Number worker nodes ", len(nodes.Items))
+	fmt.Println("Number nodes ", len(nodes.Items))
 	for node_index, node := range nodes.Items {
-		fmt.Println("Node spec\n", node.Labels)
-		freecpu, _ := node.Status.Allocatable.Cpu().AsInt64()
-		fmt.Println("CPU avail ", freecpu)
+		_, master := node.Labels["node-role.kubernetes.io/master"]
+		_, cp := node.Labels["node-role.kubernetes.io/control-plane"]
+		if !master && !cp {
+		//fmt.Println("Node spec\n", node.Labels)
+		//freecpu, _ := node.Status.Allocatable.Cpu().AsInt64()
+		//fmt.Println("CPU avail ", freecpu)
 		totalcpu, _ := node.Status.Capacity.Cpu().AsInt64()
-		fmt.Println("CPU capacity ", totalcpu)
-		freemem, _ := node.Status.Allocatable.Memory().AsInt64()
-		fmt.Println("Memory avail ", freemem)
+		//fmt.Println("CPU capacity ", totalcpu)
+		//freemem, _ := node.Status.Allocatable.Memory().AsInt64()
+		//fmt.Println("Memory avail ", freemem)
 		totalmem, _ := node.Status.Capacity.Memory().AsInt64()
-		fmt.Println("Memory capacity ", totalmem)
-		freestorage, _ := node.Status.Allocatable.StorageEphemeral().AsInt64()
-		fmt.Println("Storage avail ", freestorage)
-		totalstorage, _ := node.Status.Capacity.StorageEphemeral().AsInt64()
-		fmt.Println("Storage capacity ", totalstorage)
+		//fmt.Println("Memory capacity ", totalmem)
+		//freestorage, _ := node.Status.Allocatable.StorageEphemeral().AsInt64()
+		//fmt.Println("Storage avail ", freestorage)
+		//totalstorage, _ := node.Status.Capacity.StorageEphemeral().AsInt64()
+		//fmt.Println("Storage capacity ", totalstorage)
 
 		workernode := fluxgraph.MakeNode(node_index, false, node.Name)
 		fluxgraph.MakeEdge(rack, workernode, "contains")
@@ -198,6 +202,7 @@ func createJGF(handle framework.Handle, filename string) error {
 		mem := fluxgraph.MakeMemory(0, "memory", "KB", int(totalmem))
 		fluxgraph.MakeEdge(socket, mem, "contains")
 		fluxgraph.MakeEdge(mem, socket, "in")
+	}
 	}
 
 	err = fluxgraph.WriteJGF(filename)
