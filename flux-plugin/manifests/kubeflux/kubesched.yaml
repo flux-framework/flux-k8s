@@ -15,25 +15,22 @@ spec:
         component: scheduler
         tier: control-plane
     spec:
+      serviceAccountName: kubeflux
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+      tolerations:
+      - key: "node-role.kubernetes.io/control-plane"
+      - key: "node-role.kubernetes.io/master"
       containers:
-        - image: localhost:5000/scheduler-plugins/kube-scheduler:latest
+        - image: quay.io/cmisale/kubeflux:latest
           imagePullPolicy: Always
           command:
           - /bin/kube-scheduler
-          - --authentication-kubeconfig=/etc/kubernetes/scheduler.conf
-          - --authorization-kubeconfig=/etc/kubernetes/scheduler.conf
-          - --config=/etc/kubernetes/sched-config.yaml
+          - --leader-elect=false
+          - --config=/home/sched-config.yaml
           - -v=9
           name: schedulingplugin
           securityContext:
             privileged: true
-          volumeMounts:
-          - mountPath: /etc/kubernetes
-            name: etckubernetes
       hostNetwork: false
       hostPID: false
-      volumes:
-      - hostPath:
-          path: /etc/kubernetes/
-          type: Directory
-        name: etckubernetes

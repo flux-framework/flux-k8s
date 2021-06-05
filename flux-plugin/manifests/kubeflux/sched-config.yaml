@@ -2,8 +2,8 @@ apiVersion: kubescheduler.config.k8s.io/v1beta1
 kind: KubeSchedulerConfiguration
 leaderElection:
   leaderElect: false
-clientConnection:
-  kubeconfig: /etc/kubernetes/scheduler.conf
+  #clientConnection:
+  #kubeconfig: /etc/kubernetes/scheduler.conf
 profiles:
 - schedulerName: default-scheduler
 - schedulerName: scheduling-plugin
