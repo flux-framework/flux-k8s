@@ -17,7 +17,6 @@ package jgf
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"os"
 	"strconv"
@@ -173,19 +172,40 @@ func (g *Fluxjgf) MakeCore(index int, name string) string {
 			Paths: map[string]string{
 				"containment": "",
 			},
-			// Properties: processLabels(labels, "cpu-cpuid"),
 		},
 	}
 	g.addNode(newnode)
 	return newnode.Id
 }
 
+func (g *Fluxjgf) MakeVCore(coreid string, index int, name string) string {
+	newnode := node{
+		Id: strconv.Itoa(g.Elements),
+		Metadata: nodeMetadata{
+			Type:      "vcore",
+			Basename:  name,
+			Name:      name + strconv.Itoa(index),
+			Id:        index,
+			Uniq_id:   g.Elements,
+			Rank:      -1,
+			Exclusive: false,
+			Unit:      "",
+			Size:      1,
+			Paths: map[string]string{
+				"containment": "",
+			},
+		},
+	}
+	g.addNode(newnode)
+	g.MakeEdge(coreid, newnode.Id, "contains")
+	g.MakeEdge(newnode.Id, coreid, "in")
+	return newnode.Id
+}
+
 func (g *Fluxjgf) MakeNFDProperties(coreid string, index int, filter string, labels *map[string]string) {
 	for key, _ := range *labels {
 		if strings.Contains(key, filter) {
-			// fmt.Println("want to split ", key)
 			name := strings.Split(key, "/")[1]
-			fmt.Println("name ", name)
 			if strings.Contains(name, ".") {
 				name = strings.Split(name, ".")[1]
 			}
@@ -208,12 +228,10 @@ func (g *Fluxjgf) MakeNFDProperties(coreid string, index int, filter string, lab
 				},
 			}
 			g.addNode(newnode)
-			// fmt.Println("making edge between core ", coreid, " and property ", newnode.Id)
 			g.MakeEdge(coreid, newnode.Id, "contains")
 		}
 	}
 
-	//return newnode.Id
 }
 
 func (g *Fluxjgf) MakeMemory(index int, name string, unit string, size int) string {

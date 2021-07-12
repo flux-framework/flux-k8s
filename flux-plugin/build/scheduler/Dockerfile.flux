@@ -116,5 +116,5 @@ RUN RELEASE_VERSION=${RELEASE_VERSION} make build-scheduler.$ARCH && mv bin/kube
 WORKDIR /bin
 RUN mkdir -p /home/data/jgf/
 RUN mkdir -p /home/data/jobspecs/
-
+COPY data/jobspecOVER-NFD.yaml /home/data/jobspecs/jobspec-test.yaml
 CMD ["kube-scheduler"]

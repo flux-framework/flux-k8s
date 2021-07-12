@@ -105,7 +105,7 @@ func (kf *KubeFlux) askFlux(ctx context.Context, pod *v1.Pod) (string, error) {
 		// err := fmt.Errorf("Error reading jobspec file")
 		return "", errors.New("Error reading jobspec")
 	}
-	start := time.Now() 
+	start := time.Now()
 	reserved, allocated, at, pre, post, overhead, jobid, fluxerr := fluxcli.ReapiCliMatchAllocate(kf.fluxctx, false, string(spec))
 	elapsed := metrics.SinceInSeconds(start)
 	fmt.Println("Time elapsed: ", elapsed)
@@ -162,7 +162,7 @@ func createJGF(handle framework.Handle, filename string) error {
 	rack := fluxgraph.MakeRack(0)
 	fluxgraph.MakeEdge(cluster, rack, "contains")
 	fluxgraph.MakeEdge(rack, cluster, "in")
-
+	vcores := 1
 	fmt.Println("Number nodes ", len(nodes.Items))
 	for node_index, node := range nodes.Items {
 		_, master := node.Labels["node-role.kubernetes.io/master"]
@@ -195,7 +195,13 @@ func createJGF(handle framework.Handle, filename string) error {
 			core := fluxgraph.MakeCore(index, "core")
 			fluxgraph.MakeEdge(socket, core, "contains")
 			fluxgraph.MakeEdge(core, socket, "in")
-			fluxgraph.MakeNFDProperties(core, index, "cpu-", &node.Labels)
+			for vc := 0; vc < vcores; vc++ {
+				vcore := fluxgraph.MakeVCore(core, vc, "vcore")
+				fluxgraph.MakeNFDProperties(vcore, index, "cpu-", &node.Labels)
+			}
+			// fluxgraph.MakeEdge(socket, core, "contains")
+			// fluxgraph.MakeEdge(core, socket, "in")
+			// fluxgraph.MakeNFDProperties(core, index, "cpu-", &node.Labels)
 		}
 
 		//  MakeMemory(index int, name string, unit string, size int
