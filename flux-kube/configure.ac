@@ -33,6 +33,12 @@ AM_CHECK_PYMOD(openshift,
                [StrictVersion(openshift.__version__) >= StrictVersion('0.11.2')], [],
                [AC_MSG_ERROR([[could not find python module openshift, version 0.11.2+ required]])])
 
+#
+# Project directories
+#
+AS_VAR_SET(fluxcmddir, $libexecdir/flux/cmd)
+AC_SUBST(fluxcmddir)
+
 # Tells automake to create a Makefile
 # See https://www.gnu.org/software/automake/manual/html_node/Requirements.html
 AC_CONFIG_FILES([Makefile
