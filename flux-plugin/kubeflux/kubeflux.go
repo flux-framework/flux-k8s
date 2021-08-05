@@ -70,9 +70,14 @@ func (kf *KubeFlux) PreFilter(ctx context.Context, state *framework.CycleState, 
 
 	nodename, err := kf.askFlux(ctx, pod)
 	if err != nil {
-		fmt.Sprintf("Pod %v is unschedulable by Flux", pod.Name)
 		return framework.NewStatus(framework.Unschedulable, err.Error())
 	}
+	
+	if nodename == "NONE" {
+		fmt.Println("Pod cannot be scheduled by KubeFlux, nodename ", nodename)
+		return framework.NewStatus(framework.Unschedulable, "Pod cannot be scheduled by KubeFlux, nodename " + nodename)
+	}
+
 	fmt.Println("Node Selected: ", nodename)
 
 	state.Write(framework.StateKey(pod.Name), &fluxStateData{nodeName: nodename})
@@ -113,6 +118,11 @@ func (kf *KubeFlux) askFlux(ctx context.Context, pod *v1.Pod) (string, error) {
 		// err := fmt.Errorf("Error in ReapiCliMatchAllocate")
 		return "", errors.New("Error in ReapiCliMatchAllocate")
 	}
+	
+	if allocated == "" {
+		return "NONE", nil
+	}
+
 	printOutput(reserved, allocated, at, pre, post, overhead, jobid, fluxerr)
 	nodename := fluxcli.ReapiCliGetNode(kf.fluxctx)
 	fmt.Println("nodename ", nodename)
