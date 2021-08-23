@@ -10,7 +10,6 @@ AC_CONFIG_SRCDIR([NEWS])
 
 AM_INIT_AUTOMAKE([subdir-objects tar-ustar filename-length-max=256 foreign])
 AM_SILENT_RULES([yes])
-# AM_CONFIG_HEADER([config.h])
 AM_MAINTAINER_MODE([enable])
 
 AC_PREFIX_PROGRAM([flux])
@@ -42,7 +41,8 @@ AC_SUBST(fluxcmddir)
 # Tells automake to create a Makefile
 # See https://www.gnu.org/software/automake/manual/html_node/Requirements.html
 AC_CONFIG_FILES([Makefile
-  cmd/Makefile])
+  cmd/Makefile
+  lib/Makefile])
 
 # Generate the output
 AC_OUTPUT
