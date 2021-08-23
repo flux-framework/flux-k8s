@@ -1,3 +1,3 @@
 ACLOCAL_AMFLAGS = -I config
 
-SUBDIRS = cmd lib
+SUBDIRS = cmd lib plugins

@@ -14,8 +14,19 @@ AM_MAINTAINER_MODE([enable])
 
 AC_PREFIX_PROGRAM([flux])
 
-# Check for C compiler
-# AC_PROG_CC
+LT_INIT([dlopen])
+
+PKG_PROG_PKG_CONFIG
+
+# Checks for programs.
+AC_DEFINE([_GNU_SOURCE], 1,
+          [Define _GNU_SOURCE so that we get all necessary prototypes])
+AC_PROG_CC
+AC_PROG_CC_C99
+AC_PROG_LN_S
+AC_PROG_MAKE_SET
+AM_PROG_CC_C_O
+
 # We can add more checks in this section
 AX_FLUX_CORE
 
@@ -38,11 +49,21 @@ AM_CHECK_PYMOD(openshift,
 AS_VAR_SET(fluxcmddir, $libexecdir/flux/cmd)
 AC_SUBST(fluxcmddir)
 
+AS_VAR_SET(jobtap_plugindir, $libdir/flux/job-manager/plugins)
+AC_SUBST(jobtap_plugindir)
+
+##
+# Macros to avoid repetition in Makefiles.am's
+##
+fluxplugin_ldflags="-avoid-version -export-symbols-regex '^flux_plugin_init\$\$' --disable-static -shared -export-dynamic -module"
+AC_SUBST(fluxplugin_ldflags)
+
 # Tells automake to create a Makefile
 # See https://www.gnu.org/software/automake/manual/html_node/Requirements.html
 AC_CONFIG_FILES([Makefile
   cmd/Makefile
-  lib/Makefile])
+  lib/Makefile
+  plugins/Makefile])
 
 # Generate the output
 AC_OUTPUT
