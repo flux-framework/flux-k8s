@@ -52,6 +52,9 @@ AC_SUBST(fluxcmddir)
 AS_VAR_SET(jobtap_plugindir, $libdir/flux/job-manager/plugins)
 AC_SUBST(jobtap_plugindir)
 
+AS_VAR_SET(fluxrc1dir, $sysconfdir/flux/rc1.d)
+AC_SUBST(fluxrc1dir)
+
 ##
 # Macros to avoid repetition in Makefiles.am's
 ##
@@ -63,7 +66,8 @@ AC_SUBST(fluxplugin_ldflags)
 AC_CONFIG_FILES([Makefile
   cmd/Makefile
   lib/Makefile
-  plugins/Makefile])
+  plugins/Makefile
+  etc/Makefile])
 
 # Generate the output
 AC_OUTPUT

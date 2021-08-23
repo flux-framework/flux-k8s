@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# Submit flux kube daemon as a job 
+# so it is cleaned up when flux exits
+if test $(flux getattr rank) -eq 0; then
+    flux jobtap load alloc-bypass.so
+    flux mini submit \
+         --setattr=system.alloc-bypass.R="$(flux kvs get resource.R \
+         | flux R decode --include=0)" \
+         flux kube daemonize
+fi
