@@ -1,0 +1,54 @@
+apiVersion: kubeflow.org/v1alpha2
+kind: MPIJob
+metadata:
+  name: gromacs-%JOBLABEL%
+spec:
+  schedulerName: scheduling-plugin
+  slotsPerWorker: 1
+  cleanPodPolicy: Running
+  mpiReplicaSpecs:
+    Launcher:
+      replicas: 1
+      template:
+        spec:
+          containers:
+            - image: %DOCKER_IMAGE%
+              name: gromacs-container
+              command:
+                - /usr/local/openmpi/bin/mpirun
+                - --allow-run-as-root
+                - -np
+                - "%NP%"
+                - -bind-to
+                - none
+                - -map-by
+                - slot
+                - -mca
+                - pml
+                - ob1
+                - -mca
+                - btl
+                - ^openib
+                - gmx
+                - mdrun
+                - -noconfout
+                - -nsteps
+                - "%STEPS%"
+                - -resethway
+                - -v
+                - -ntomp
+                - "2"
+                - -pin
+                - "on"
+                - -s
+                - "/data/water-cut1.0_GMX50_bare/1536/topol_pme.tpr"
+                - -g
+                - "/data/md.log"
+    Worker:
+      replicas: %NP%
+      template:
+        spec:
+          schedulerName: scheduling-plugin
+          containers:
+            - image: %DOCKER_IMAGE%
+              name: gromacs-container
