@@ -11,6 +11,6 @@ sed s/%TAG%/latest/g  kubesched.template.yaml > ${SCHEDULER_MANIFEST}
 
 echo Running KubeFlux scheduler with subnet awareness
 sed s/%TAG%/sa/g  kubesched.template.yaml > ${SCHEDULER_MANIFEST}
-./launch flux flux ${SCHEDULER_MANIFEST}
+./launch flux flux-sa ${SCHEDULER_MANIFEST}
 
 rm ${SCHEDULER_MANIFEST}
