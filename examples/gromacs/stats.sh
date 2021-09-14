@@ -2,13 +2,12 @@
 
 set -e
 
-GROMACS_RESULTS_PATH=${GROMACS_RESULTS_PATH:-results}
+source conf.env
+
 GROMACS_ANALYSIS_FLAGS=${GROMACS_ANALYSIS_FLAGS:--p -l}
 
-data_root=$(ls -d $GROMACS_RESULTS_PATH)
+data_root=$(ls -d ${KFGROMACS_RESULTS_PATH})
 
-csv=$(mktemp)
+csv=${KFGROMACS_RESULTS_PATH}/grand.csv
 ./aggregate.sh $data_root | sed '/,,/d ' > $csv
 ./analysis.py ${GROMACS_ANALYSIS_FLAGS} $csv
-rm $csv
-

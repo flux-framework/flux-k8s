@@ -2,17 +2,18 @@
 
 SCHED=$1
 OUTFILE=$2
-FLUXYAML=$3
+OUTPATH=$3
+FLUXYAML=$4
 COMMENT="#"
 
-if [[ -z $SCHED || -z $OUTFILE ]]; then
-	echo "usage: ./launch.sh <flux|default> <output-file> <kubeflux-deployment-file>"
+if [[ -z $SCHED || -z $OUTFILE || -z $OUTPATH ]]; then
+	echo "usage: ./launch.sh <flux|default> <output-file> <output-path> <kubeflux-deployment-file>"
 	exit 1
 fi
 
 if [[ $SCHED == "flux" && -z $FLUXYAML ]]; then
 	echo "path to KubeFlux yaml missing!"
-	echo "usage: ./launch.sh <flux|default> <output-file> <kubeflux-deployment-file>"
+	echo "usage: ./launch.sh <flux|default> <output-file> <output-path> <kubeflux-deployment-file>"
 fi
 
 if [[ $SCHED == "flux" ]]; then
@@ -24,8 +25,7 @@ if [[ $SCHED == "flux" ]]; then
 fi
 
 echo Saving cluster worker nodes information
-#kubectl get nodes -o wide | awk {'print $1"\t" $3'} > cluster-nodes
-kubectl get nodes -o wide > cluster-nodes
+kubectl get nodes -o wide > ${OUTPATH}/cluster-nodes
 
 for NP in 1 2 4 8 16 32 48 64; do 
 	STEPS=$(( 100 * ${NP} ))
@@ -34,16 +34,16 @@ for NP in 1 2 4 8 16 32 48 64; do
 	fi
 	echo Steps: $STEPS
 
-	OUTDIR=${NP}mpi
+	OUTDIR=${OUTPATH}/${NP}mpi
 	mkdir -p ${OUTDIR}
 
-	sed -e s/%STEPS%/${STEPS}/g -e s/%NP%/${NP}/g -e "s/\(schedulerName: [[:alpha:]]*\)/${COMMENT}\1/g" gromacs-mpijob-benchmark.yaml > deployment.yaml	
+	sed -e s/%STEPS%/${STEPS}/g -e s/%NP%/${NP}/g -e "s/\(schedulerName: [[:alpha:]]*\)/${COMMENT}\1/g" gromacs-mpijob-benchmark.yaml > ${OUTDIR}/deployment.yaml
 
 	echo Start with $NP MPI ranks:
 
 	for i in {1..5}; do
 		echo Creating deployment with $NP MPI Ranks
-		kubectl create -f deployment.yaml
+		kubectl create -f ${OUTDIR}/deployment.yaml
 		sleep 10s
 
 		LAUNCHER=`kubectl get po -o name | grep launcher`
@@ -67,7 +67,7 @@ for NP in 1 2 4 8 16 32 48 64; do
 		sleep 10s
 		
 		kubectl logs ${LAUNCHER} >>  ${OUTDIR}/${OUTFILE}-run${i}
-		kubectl delete -f deployment.yaml 
+		kubectl delete -f ${OUTDIR}/deployment.yaml
 
 		echo Need to wait for pods to go away
 		while [ `kubectl get pods | grep gromacs-benchmark-worker  | wc -l` -gt 0 ]; do
