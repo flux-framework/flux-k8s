@@ -39,10 +39,37 @@ make \
 ```
 
 ### Launch the experiments
+The `run-all.sh` script will run the entire test suite with the Kubernetes Default scheduler, KubeFlux and KubeFlux with subnet awareness.
 
 ```bash
-./launch.sh ${PWD}/kubesched.yaml
+./run-all.sh
 ```
+
+#### Run tests separately
+To run single tests, we need to customize `kubesched.template.yaml` for KubeFlux. 
+
+The `%TAG%` variable can be changed with either `latest` or `sa` to use KubeFlux or KubeFlux with subnet awareness respectively.
+
+For instance, to run a test suite with KubeFlux:
+
+```bash
+sed s/%TAG%/latest/g  kubesched.template.yaml > kubesched.yaml
+./launch.sh flux flux kubesched.yaml
+```
+
+Or, to run KubeFlux with subnet awareness:
+```bash
+sed s/%TAG%/sa/g  kubesched.template.yaml > kubesched.yaml
+./launch.sh flux flux kubesched.yaml
+```
+
+The tests with the Kube-scheduler can be run with:
+```bash
+./launch.sh default default
+```
+
+More details about `launch.sh` are described in the following section.
+
 
 ## Details
 
