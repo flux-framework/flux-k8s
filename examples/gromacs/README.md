@@ -18,16 +18,16 @@ Set your Kubernetes cluster:
 export `KUBECONFIG`=`path/to/admin.conf`
 ```
 
-Edit `conf.env` and set `KFGROMACS_RESULTS_PATH` to the path for storing the results of the experiments.
+Edit `conf.env` and fit the configuration to your environment.
 
 
 ### Generate the yaml template file (using an existing image)
 
 To generate a manifest against the image
-`quay.io/cmisale/kubeflux-gromacs:latest`:
+`quay.io/cmisale/kubeflux:latest`:
 
 ```bash
-make gromacs-mpijob-benchmark.yaml DOCKER_IMAGE=quay.io/cmisale/kubeflux-gromacs:latest
+make gromacs-mpijob-benchmark.yaml DOCKER_IMAGE=quay.io/cmisale/kubeflux:latest
 ```
 
 See below if you prefer to build your own image.

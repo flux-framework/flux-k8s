@@ -1,12 +1,13 @@
 #!/bin/bash
 
+source conf.env
+
 SCHED=$1
 OUTFILE=$2
-OUTPATH=$3
-FLUXYAML=$4
+FLUXYAML=$3
 COMMENT="#"
 
-if [[ -z $SCHED || -z $OUTFILE || -z $OUTPATH ]]; then
+if [[ -z $SCHED || -z $OUTFILE ]]; then
 	echo "usage: ./launch.sh <flux|default> <output-file> <output-path> <kubeflux-deployment-file>"
 	exit 1
 fi
@@ -25,23 +26,25 @@ if [[ $SCHED == "flux" ]]; then
 fi
 
 echo Saving cluster worker nodes information
-kubectl get nodes -o wide > ${OUTPATH}/cluster-nodes
+kubectl get nodes -o wide > ${KFGROMACS_RESULTS_PATH}/cluster-nodes
+nnodes=$(tail -n +2 ${KFGROMACS_RESULTS_PATH}/cluster-nodes | wc -l)
 
-for NP in 1 2 4 8 16 32 48 64; do 
-	STEPS=$(( 100 * ${NP} ))
-	if [[ $NP -gt 32 ]]; then
-		STEPS=$(( 100 * 32 ))
+for NP in $(echo ${KFGROMACS_MPI_RANKS} | sed 's/,/ /g'); do
+	if [[ $NP -gt ${nnodes} ]]; then
+		STEPS=$(( 100 * ${nnodes} ))
+	else
+		STEPS=$(( 100 * ${NP} ))
 	fi
 	echo Steps: $STEPS
 
-	OUTDIR=${OUTPATH}/${NP}mpi
+	OUTDIR=${KFGROMACS_RESULTS_PATH}/${NP}mpi
 	mkdir -p ${OUTDIR}
 
 	sed -e s/%STEPS%/${STEPS}/g -e s/%NP%/${NP}/g -e "s/\(schedulerName: [[:alpha:]]*\)/${COMMENT}\1/g" gromacs-mpijob-benchmark.yaml > ${OUTDIR}/deployment.yaml
 
 	echo Start with $NP MPI ranks:
 
-	for i in {1..5}; do
+	for i in $(seq 1 ${KFGROMACS_REPETITIONS}); do
 		echo Creating deployment with $NP MPI Ranks
 		kubectl create -f ${OUTDIR}/deployment.yaml
 		sleep 10s
