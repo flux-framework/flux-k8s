@@ -24,7 +24,7 @@ Edit `conf.env` and fit the configuration to your environment.
 ### Generate the yaml template file (using an existing image)
 
 To generate a manifest against the image
-`quay.io/cmisale/kubeflux:latest`:
+`quay.io/cmisale/gromacs:latest`:
 
 ```bash
 make gromacs-mpijob-benchmark.yaml DOCKER_IMAGE=quay.io/cmisale/gromacs:latest
