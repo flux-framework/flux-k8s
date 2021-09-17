@@ -27,7 +27,7 @@ To generate a manifest against the image
 `quay.io/cmisale/kubeflux:latest`:
 
 ```bash
-make gromacs-mpijob-benchmark.yaml DOCKER_IMAGE=quay.io/cmisale/kubeflux:latest
+make gromacs-mpijob-benchmark.yaml DOCKER_IMAGE=quay.io/cmisale/gromacs:latest
 ```
 
 See below if you prefer to build your own image.

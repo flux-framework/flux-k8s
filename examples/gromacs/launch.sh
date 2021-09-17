@@ -26,6 +26,7 @@ if [[ $SCHED == "flux" ]]; then
 fi
 
 echo Saving cluster worker nodes information
+mkdir -p $KFGROMACS_RESULTS_PATH
 kubectl get nodes -o wide > ${KFGROMACS_RESULTS_PATH}/cluster-nodes
 nnodes=$(tail -n +2 ${KFGROMACS_RESULTS_PATH}/cluster-nodes | wc -l)
 
