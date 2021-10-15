@@ -107,17 +107,11 @@ class GetCmd(InitKube):
             "get_object",
             metavar="G",
             type=str,
-            help="print OpenShift object, supported arguments:\n"
+            help="print OpenShift object or attribute, supported arguments:\n"
             "template_names: names of available OpenShift templates\n"
             "template_params: OpenShift template parameters\n"
             "templates: OpenShift templates\n"
-            "pods: OpenShift pods\n"
-            "services: OpenShift services\n"
-            "deploymentconfig: OpenShift deployment configurations\n"
-            "deployment: OpenShift deployments\n"
-            "pvc: OpenShift persistent volume claims\n"
-            "secrets: OpenShift secrets\n"
-            "routes: OpenShift routes\n",
+            "any other OpenShift object, e.g., pods or services\n",
         )
 
     def main(self, args):
