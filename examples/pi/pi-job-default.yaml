@@ -1,0 +1,20 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pi-job-default-sched
+spec:
+  completions: 4
+  template:
+    metadata:
+      labels:
+        app: pi-test-default
+    spec:
+      containers:
+      - name: pi-test
+        image: localhost:5000/pi:latest # kind with local registry
+        resources:
+          limits:
+            cpu: "12"
+          requests:
+            cpu: "12"
+      restartPolicy: Never      

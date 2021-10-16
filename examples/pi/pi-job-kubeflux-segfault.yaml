@@ -1,0 +1,21 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pi-job-kubeflux-sched-segfault
+spec:
+  completions: 4
+  template:
+    metadata:
+      labels:
+        app: pi-test-kubeflux-segfault
+    spec:
+      schedulerName: scheduling-plugin # comment this out to get it scheduled by the default scheduler
+      containers:
+      - name: pi-test
+        image: localhost:5000/pi-segfault:latest # kind with local registry
+        resources:
+          limits:
+            cpu: "8"
+          requests:
+            cpu: "8"
+      restartPolicy: Never
