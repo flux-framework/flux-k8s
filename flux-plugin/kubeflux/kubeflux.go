@@ -19,17 +19,17 @@ package kubeflux
 import (
 	"context"
 	"errors"
+	"fluxcli"
 	"fmt"
 	"io/ioutil"
-	"k8s.io/klog/v2"
-	"time"
-	"k8s.io/kubernetes/pkg/scheduler/metrics"
-	"fluxcli"
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
-	"sigs.k8s.io/scheduler-plugins/pkg/kubeflux/utils"
+	"k8s.io/kubernetes/pkg/scheduler/metrics"
 	"sigs.k8s.io/scheduler-plugins/pkg/kubeflux/jobspec"
+	"sigs.k8s.io/scheduler-plugins/pkg/kubeflux/utils"
+	"time"
 )
 
 type KubeFlux struct {
@@ -64,17 +64,18 @@ func (kf *KubeFlux) PreFilter(ctx context.Context, state *framework.CycleState, 
 	klog.Infof("Examining the pod")
 
 	fluxjbs := jobspec.InspectPodInfo(pod)
-	filename := "/home/data/jobspecs/jobspec.yaml"
+	currenttime := time.Now()
+	filename := fmt.Sprintf("/home/data/jobspecs/jobspec-%s-%s.yaml", currenttime.Format(time.RFC3339Nano), pod.Name)
 	jobspec.CreateJobSpecYaml(fluxjbs, filename)
 
-	nodename, err := kf.askFlux(ctx, pod)
+	nodename, err := kf.askFlux(ctx, pod, filename)
 	if err != nil {
 		return framework.NewStatus(framework.Unschedulable, err.Error())
 	}
-	
+
 	if nodename == "NONE" {
 		fmt.Println("Pod cannot be scheduled by KubeFlux, nodename ", nodename)
-		return framework.NewStatus(framework.Unschedulable, "Pod cannot be scheduled by KubeFlux, nodename " + nodename)
+		return framework.NewStatus(framework.Unschedulable, "Pod cannot be scheduled by KubeFlux, nodename "+nodename)
 	}
 
 	fmt.Println("Node Selected: ", nodename)
@@ -101,9 +102,8 @@ func (kf *KubeFlux) PreFilterExtensions() framework.PreFilterExtensions {
 	return nil
 }
 
-func (kf *KubeFlux) askFlux(ctx context.Context, pod *v1.Pod) (string, error) {
+func (kf *KubeFlux) askFlux(ctx context.Context, pod *v1.Pod, filename string) (string, error) {
 
-	filename := "/home/data/jobspecs/jobspec.yaml"
 	spec, err := ioutil.ReadFile(filename)
 	if err != nil {
 		// err := fmt.Errorf("Error reading jobspec file")
@@ -117,7 +117,7 @@ func (kf *KubeFlux) askFlux(ctx context.Context, pod *v1.Pod) (string, error) {
 		// err := fmt.Errorf("Error in ReapiCliMatchAllocate")
 		return "", errors.New("Error in ReapiCliMatchAllocate")
 	}
-	
+
 	if allocated == "" {
 		return "NONE", nil
 	}
@@ -145,7 +145,6 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 		fmt.Println("Error reading JGF")
 		return nil, err
 	}
-
 
 	fluxcli.ReapiCliInit(fctx, string(jgf))
 
