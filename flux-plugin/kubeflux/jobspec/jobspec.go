@@ -21,6 +21,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"strings"
 
 	"strconv"
 
@@ -100,10 +101,15 @@ func CreateJobSpecYaml(pr *PodRequest, filename string) error {
 		if len(pr.Labels) > 0 {
 			r := make([]Resource, 0)
 			for key, val := range pr.Labels {
-				count, _ := strconv.Atoi(val)
-				r = append(r, Resource{Type: key, Count: int64(count)})
+				if strings.Contains(key, "nfd") {
+					count, _ := strconv.Atoi(val)
+
+					r = append(r, Resource{Type: strings.Split(key,".")[1], Count: int64(count)})
+				}
 			}
-			socket_resources[0].With = r
+			if len(r) > 0 {
+				socket_resources[0].With = r
+			}
 		}
 		if pr.Memory[i] > 0 {
 			socket_resources = append(socket_resources, Resource{Type: "memory", Count: pr.Memory[i]})

@@ -112,13 +112,36 @@ func processLabels(labels *map[string]string, filter string) (filtered map[strin
 	return
 }
 
-func (g *Fluxjgf) MakeNode(index int, exclusive bool, ip string) string {
+
+func (g *Fluxjgf) MakeSubnet(index int, ip string) string {
+	newnode := node{
+		Id: strconv.Itoa(g.Elements),
+		Metadata: nodeMetadata{
+			Type:      "subnet",
+			Basename:  ip,
+			Name:      ip + strconv.Itoa(g.Elements),
+			Id:        index,
+			Uniq_id:   g.Elements,
+			Rank:      -1,
+			Exclusive: false,
+			Unit:      "",
+			Size:      1,
+			Paths: map[string]string{
+				"containment": "",
+			},
+		},
+	}
+	g.addNode(newnode)
+	return newnode.Id
+}
+
+func (g *Fluxjgf) MakeNode(index int, exclusive bool, subnet string) string {
 	newnode := node{
 		Id: strconv.Itoa(g.Elements),
 		Metadata: nodeMetadata{
 			Type:      "node",
-			Basename:  ip,
-			Name:      ip + strconv.Itoa(g.Elements),
+			Basename:  subnet,
+			Name:      subnet + strconv.Itoa(g.Elements),
 			Id:        index,
 			Uniq_id:   g.Elements,
 			Rank:      -1,
