@@ -111,6 +111,18 @@ func (kf *KubeFlux) PreFilterExtensions() framework.PreFilterExtensions {
 
 func (kf *KubeFlux) askFlux(ctx context.Context, pod *v1.Pod, filename string) (string, error) {
 
+	// clean up previous match if a pod has already allocated previously
+	kf.mutex.Lock()
+	_, isPodAllocated := kf.podNameToJobId[pod.Name]
+	kf.mutex.Unlock()
+
+	if isPodAllocated {
+		fmt.Println("Clean up previous allocation")
+		kf.mutex.Lock()
+		kf.cancelFluxJobForPod(pod.Name)
+		kf.mutex.Unlock()
+	}
+
 	spec, err := ioutil.ReadFile(filename)
 	if err != nil {
 		// err := fmt.Errorf("Error reading jobspec file")
@@ -119,7 +131,7 @@ func (kf *KubeFlux) askFlux(ctx context.Context, pod *v1.Pod, filename string) (
 	start := time.Now()
 	reserved, allocated, at, pre, post, overhead, jobid, fluxerr := fluxcli.ReapiCliMatchAllocate(kf.fluxctx, false, string(spec))
 	elapsed := metrics.SinceInSeconds(start)
-	fmt.Println("Time elapsed: ", elapsed)
+	fmt.Println("Time elapsed (Match Allocate) :", elapsed)
 	if fluxerr != 0 {
 		// err := fmt.Errorf("Error in ReapiCliMatchAllocate")
 		return "", errors.New("Error in ReapiCliMatchAllocate")
@@ -135,17 +147,37 @@ func (kf *KubeFlux) askFlux(ctx context.Context, pod *v1.Pod, filename string) (
 
 	kf.mutex.Lock()
 	kf.podNameToJobId[pod.Name] = jobid
-	kf.mutex.Unlock()
-
 	fmt.Println("Check job set:")
 	fmt.Println(kf.podNameToJobId)
+	kf.mutex.Unlock()
 
 	return nodename, nil
 }
 
+func (kf *KubeFlux) cancelFluxJobForPod(podName string) {
+	jobid := kf.podNameToJobId[podName]
+
+	fmt.Printf("Cancel flux job: %v for pod %s\n", jobid, podName)
+
+	start := time.Now()
+	err := fluxcli.ReapiCliCancel(kf.fluxctx, int64(jobid), false)
+
+	if err == 0 {
+		delete(kf.podNameToJobId, podName)
+	} else {
+		fmt.Printf("Failed to delete pod %s from the podname-jobid map.\n", podName)
+	}
+
+	elapsed := metrics.SinceInSeconds(start)
+	fmt.Println("Time elapsed (Cancel Job) :", elapsed)
+
+	fmt.Printf("Job cancellation for pod %s result: %d\n", podName, err)
+	fmt.Println("Check job set: after delete")
+	fmt.Println(kf.podNameToJobId)
+}
+
 // initialize and return a new Flux Plugin
 func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
-
 	// creates the in-cluster config
 	config, err := rest.InClusterConfig()
 	if err != nil {
@@ -159,10 +191,8 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 		return nil, err
 	}
 
-	// TODO: create informer
 	factory := informers.NewSharedInformerFactory(clientset, 0)
 	podInformer := factory.Core().V1().Pods().Informer()
-	nodeInformer := factory.Core().V1().Nodes().Informer()
 
 	fctx := fluxcli.NewReapiCli()
 	fmt.Println("Created cli context ", fctx)
@@ -179,7 +209,10 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 		return nil, err
 	}
 
+	start := time.Now()
 	fluxcli.ReapiCliInit(fctx, string(jgf))
+	elapsed := metrics.SinceInSeconds(start)
+	fmt.Println("Time elapsed (Cli Init with Graph) :", elapsed)
 
 	// if ret != 0 {
 	// 	fmt.Println("Error while initializing ReapiCli")
@@ -190,37 +223,19 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 	kf := &KubeFlux{handle: handle, fluxctx: fctx, podNameToJobId: make(map[string]uint64)}
 
 	podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    kf.addPod,
 		UpdateFunc: kf.updatePod,
-		DeleteFunc: kf.deletePod,
 	})
 
-	nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    kf.addNode,
-		UpdateFunc: kf.updateNode,
-		DeleteFunc: kf.deleteNode,
-	})
-
-	// TODO: this informer can not be stopped politely
 	stopPodInformer := make(chan struct{})
 	go podInformer.Run(stopPodInformer)
-	stopNodeInformer := make(chan struct{})
-	go nodeInformer.Run(stopNodeInformer)
 
 	return kf, nil
 }
 
 ////// EventHandlers
 
-func (kf *KubeFlux) addPod(obj interface{}) {
-	fmt.Println("add Pod event handler")
-	pod := obj.(*v1.Pod)
-	fmt.Println(pod)
-	fmt.Println(pod.Name, pod.Status)
-}
-
 func (kf *KubeFlux) updatePod(oldObj, newObj interface{}) {
-	fmt.Println("update Pod event handler")
+	fmt.Println("updatePod event handler")
 	oldPod := oldObj.(*v1.Pod)
 	newPod := newObj.(*v1.Pod)
 	fmt.Println(oldPod)
@@ -228,62 +243,40 @@ func (kf *KubeFlux) updatePod(oldObj, newObj interface{}) {
 	fmt.Println(oldPod.Name, oldPod.Status)
 	fmt.Println(newPod.Name, newPod.Status)
 
-	if newPod.Namespace == "default" && newPod.Status.Phase == v1.PodSucceeded {
-		fmt.Printf("Must tell kubeflux %s finished\n", newPod.Name)
+	switch newPod.Status.Phase {
+	case v1.PodPending:
+		// in this state we don't know if a pod is going to be running, thus we don't need to update job map
+	case v1.PodRunning:
+		// if a pod is start running, we can add it state to the delta graph if it is scheduled by other scheduler
+	case v1.PodSucceeded:
+		fmt.Printf("Pod %s succeeded, kubeflux needs to free the resources\n", newPod.Name)
 
 		kf.mutex.Lock()
 		defer kf.mutex.Unlock()
 
-		if jobid, ok := kf.podNameToJobId[newPod.Name]; ok {
-			// possbile typo in https://github.com/cmisale/flux-sched/blob/gobind-dev/resource/hlapi/bindings/go/src/fluxcli/reapi_cli.go
-			err := fluxcli.ReapiCliCancel(kf.fluxctx, int64(jobid), false)
-
-			if err == 0 {
-				delete(kf.podNameToJobId, newPod.Name)
-			} else {
-				fmt.Printf("Failed to delete pod %s from the pdoname-jobid map.\n", newPod.Name)
-			}
-
-			fmt.Printf("Job cancellation result: %d\n", err)
-			fmt.Println("Check job set: after delete")
-			fmt.Println(kf.podNameToJobId)
+		if _, ok := kf.podNameToJobId[newPod.Name]; ok {
+			kf.cancelFluxJobForPod(newPod.Name)
 		} else {
 			fmt.Printf("Succeeded pod %s/%s doesn't have flux jobid\n", newPod.Namespace, newPod.Name)
-
 		}
+	case v1.PodFailed:
+		// a corner case need to be tested, the pod exit code is not 0, can be created with segmentation fault pi test
+		fmt.Printf("Pod %s failed, kubeflux needs to free the resources\n", newPod.Name)
 
+		kf.mutex.Lock()
+		defer kf.mutex.Unlock()
+
+		if _, ok := kf.podNameToJobId[newPod.Name]; ok {
+			kf.cancelFluxJobForPod(newPod.Name)
+		} else {
+			fmt.Printf("Failed pod %s/%s doesn't have flux jobid\n", newPod.Namespace, newPod.Name)
+		}
+	case v1.PodUnknown:
+		// don't know how to deal with it as it's unknown phase
+	default:
+		// shouldn't enter this branch
 	}
 
-}
-
-func (kf *KubeFlux) deletePod(obj interface{}) {
-	fmt.Println("delete Pod event handler")
-	pod := obj.(*v1.Pod)
-	fmt.Println(pod)
-	fmt.Println(pod.Name, pod.Status)
-}
-
-func (kf *KubeFlux) addNode(obj interface{}) {
-	fmt.Println("add Node event handler")
-	node := obj.(*v1.Node)
-	fmt.Println(node.Name)
-	fmt.Println(node)
-}
-
-func (kf *KubeFlux) updateNode(oldObj, newObj interface{}) {
-	fmt.Println("update Node event handler")
-	oldNode := oldObj.(*v1.Node)
-	newNode := newObj.(*v1.Node)
-	fmt.Println(newNode.Name)
-	fmt.Println(oldNode)
-	fmt.Println(newNode)
-}
-
-func (kf *KubeFlux) deleteNode(obj interface{}) {
-	fmt.Println("delete Node event handler")
-	node := obj.(*v1.Node)
-	fmt.Println(node.Name)
-	fmt.Println(node)
 }
 
 ////// Utility functions

@@ -1,14 +1,17 @@
 package utils
 
 import (
-	"k8s.io/kubernetes/pkg/scheduler/framework"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"context"
 	"fmt"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/kubernetes/pkg/scheduler/framework"
+	"k8s.io/kubernetes/pkg/scheduler/metrics"
 	"sigs.k8s.io/scheduler-plugins/pkg/kubeflux/jgf"
+	"time"
 )
 
 func CreateJGF(handle framework.Handle, filename string) error {
+	start := time.Now()
 	ctx := context.Background()
 	clientset := handle.ClientSet()
 	nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
@@ -20,7 +23,7 @@ func CreateJGF(handle framework.Handle, filename string) error {
 
 	fluxgraph.MakeEdge(cluster, rack, "contains")
 	fluxgraph.MakeEdge(rack, cluster, "in")
-	
+
 	vcores := 0
 	fmt.Println("Number nodes ", len(nodes.Items))
 	// sdnCount := 0
@@ -30,7 +33,7 @@ func CreateJGF(handle framework.Handle, filename string) error {
 		if !master && !cp {
 
 			// Check if subnet already exists
-			// Here we build subnets according to IP addresses of nodes. 
+			// Here we build subnets according to IP addresses of nodes.
 			// This was for GROMACS, therefore I comment that out and go back
 			// to build racks. One day, this will be customized by users.
 
@@ -48,7 +51,6 @@ func CreateJGF(handle framework.Handle, filename string) error {
 			// 	fluxgraph.MakeEdge(subnet, cluster, "in")
 			// }
 			// subnet := subnets[subnetName]
-
 
 			totalcpu, _ := node.Status.Capacity.Cpu().AsInt64()
 			totalmem, _ := node.Status.Capacity.Memory().AsInt64()
@@ -82,10 +84,14 @@ func CreateJGF(handle framework.Handle, filename string) error {
 		}
 	}
 
+	elapsed := metrics.SinceInSeconds(start)
+	fmt.Println("Time elapsed (CreateJGF) :", elapsed)
 	err = fluxgraph.WriteJGF(filename)
 	if err != nil {
 		return err
 	}
+	elapsed_write := metrics.SinceInSeconds(start)
+	fmt.Println("Time elapsed (CreateJGF write) :", elapsed_write-elapsed)
 	return nil
 
 }
