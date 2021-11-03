@@ -59,7 +59,7 @@ make DOCKER_IMAGE_NAME=quay.io/foo DOCKER_IMAGE_TAG=bar
 
 ### Run tests separately
 
-To run single tests, we need to customize `kubesched.template.yaml` for KubeFlux.
+To run single tests, we need to Kustomize `kubesched.template.yaml` for KubeFlux.
 
 The `%TAG%` variable can be changed with either `latest` or `sa` to use KubeFlux or KubeFlux with subnet awareness respectively.
 
