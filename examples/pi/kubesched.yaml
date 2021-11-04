@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubeflux-plugin
+  namespace: kube-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      component: scheduler
+      tier: control-plane
+  template:
+    metadata:
+      labels:
+        component: scheduler
+        tier: control-plane
+        app: kubeflux
+    spec:
+      serviceAccountName: kubeflux
+#      nodeSelector:
+#        node-role.kubernetes.io/control-plane: ""
+#      tolerations:
+#      - key: "node-role.kubernetes.io/control-plane"
+#      - key: "node-role.kubernetes.io/master"
+      containers:
+        - image: quay.io/cmisale/kubeflux:latest
+        # - image: quay.io/cmisale/kubeflux:dev
+          imagePullPolicy: Always
+          command:
+          - /bin/kube-scheduler
+          - --leader-elect=false
+          - --config=/home/sched-config.yaml
+          - -v=9
+          name: kubeflux-plugin
+          securityContext:
+            privileged: true
+      hostNetwork: false
+      hostPID: false
