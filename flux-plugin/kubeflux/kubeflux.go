@@ -232,8 +232,7 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 	return kf, nil
 }
 
-////// EventHandlers
-
+// EventHandlers
 func (kf *KubeFlux) updatePod(oldObj, newObj interface{}) {
 	fmt.Println("updatePod event handler")
 	oldPod := oldObj.(*v1.Pod)
