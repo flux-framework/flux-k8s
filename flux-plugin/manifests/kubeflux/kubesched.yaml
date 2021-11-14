@@ -22,14 +22,14 @@ spec:
       - key: "node-role.kubernetes.io/control-plane"
       - key: "node-role.kubernetes.io/master"
       containers:
-        - image: quay.io/cmisale/kubeflux:latest
+        - image: quay.io/cmisale/kubeflux:dev
           imagePullPolicy: Always
           command:
           - /bin/kube-scheduler
           - --leader-elect=false
           - --config=/home/sched-config.yaml
           - -v=9
-          name: schedulingplugin
+          name: scheduling-plugin
           securityContext:
             privileged: true
       hostNetwork: false
