@@ -6,6 +6,14 @@ rules:
   - apiGroups:
       - ""
     resources:
+      - namespaces
+    verbs:
+      - list
+      - watch
+      - get
+  - apiGroups:
+      - ""
+    resources:
       - endpoints
       - events
     verbs:
@@ -109,6 +117,8 @@ rules:
     resources:
       - storageclasses
       - csinodes
+      - csidrivers
+      - csistoragecapacities
     verbs:
       - get
       - list
