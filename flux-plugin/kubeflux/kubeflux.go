@@ -125,15 +125,15 @@ func (kf *KubeFlux) askFlux(ctx context.Context, pod *v1.Pod, filename string) (
 
 	spec, err := ioutil.ReadFile(filename)
 	if err != nil {
-		// err := fmt.Errorf("Error reading jobspec file")
 		return "", errors.New("Error reading jobspec")
 	}
 	start := time.Now()
-	reserved, allocated, at, pre, post, overhead, jobid, fluxerr := fluxcli.ReapiCliMatchAllocate(kf.fluxctx, false, string(spec))
+	reserved, allocated, at, overhead, jobid, fluxerr := fluxcli.ReapiCliMatchAllocate(kf.fluxctx, false, string(spec))
+	fmt.Printf("Errors so far: %s\n", fluxcli.ReapiCliGetErrMsg(kf.fluxctx))
+
 	elapsed := metrics.SinceInSeconds(start)
 	fmt.Println("Time elapsed (Match Allocate) :", elapsed)
 	if fluxerr != 0 {
-		// err := fmt.Errorf("Error in ReapiCliMatchAllocate")
 		return "", errors.New("Error in ReapiCliMatchAllocate")
 	}
 
@@ -141,8 +141,10 @@ func (kf *KubeFlux) askFlux(ctx context.Context, pod *v1.Pod, filename string) (
 		return "NONE", nil
 	}
 
-	printOutput(reserved, allocated, at, pre, post, overhead, jobid, fluxerr)
-	nodename := fluxcli.ReapiCliGetNode(kf.fluxctx)
+	printOutput(reserved, allocated, at, overhead, jobid, fluxerr)
+
+	node := utils.ParseAllocResult(allocated)
+	nodename := node.Basename
 	fmt.Println("nodename ", nodename)
 
 	kf.mutex.Lock()
@@ -210,7 +212,7 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 	}
 
 	start := time.Now()
-	fluxcli.ReapiCliInit(fctx, string(jgf))
+	fluxcli.ReapiCliInit(fctx, string(jgf), "{}")
 	elapsed := metrics.SinceInSeconds(start)
 	fmt.Println("Time elapsed (Cli Init with Graph) :", elapsed)
 
@@ -279,7 +281,7 @@ func (kf *KubeFlux) updatePod(oldObj, newObj interface{}) {
 }
 
 ////// Utility functions
-func printOutput(reserved bool, allocated string, at int64, pre uint32, post uint32, overhead float64, jobid uint64, fluxerr int) {
+func printOutput(reserved bool, allocated string, at int64, overhead float64, jobid uint64, fluxerr int) {
 	fmt.Println("\n\t----Match Allocate output---")
-	fmt.Printf("jobid: %d\nreserved: %t\nallocated: %s\nat: %d\npreorder visit count: %d\npostorder visit count: %d\noverhead: %f\nerror: %d\n", jobid, reserved, allocated, at, pre, post, overhead, fluxerr)
+	fmt.Printf("jobid: %d\nreserved: %t\nallocated: %s\nat: %d\noverhead: %f\nerror: %d\n", jobid, reserved, allocated, at, overhead, fluxerr)
 }

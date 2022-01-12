@@ -8,6 +8,7 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/metrics"
 	"sigs.k8s.io/scheduler-plugins/pkg/kubeflux/jgf"
 	"time"
+	"encoding/json"
 )
 
 func CreateJGF(handle framework.Handle, filename string) error {
@@ -94,4 +95,42 @@ func CreateJGF(handle framework.Handle, filename string) error {
 	fmt.Println("Time elapsed (CreateJGF write) :", elapsed_write-elapsed)
 	return nil
 
+}
+
+type allocation struct {
+	Type string
+	Name string
+	Basename string
+}
+
+func ParseAllocResult(allocated string) allocation{
+	var dat map[string]interface{}
+	var result allocation 
+
+	if err := json.Unmarshal([]byte(allocated), &dat); err != nil {
+        panic(err)
+    }
+	// fmt.Println("PRINTING DATA:\n", dat)
+	// graph := dat["graph"]
+	// fmt.Println("GET GRAPH:\n ", graph)
+	nodes := dat["graph"].(interface{})
+	str1 := nodes.(map[string]interface {})
+    // fmt.Println("GET NODES:\n", str1["nodes"])
+	str2 := str1["nodes"].([]interface {})
+	for _, item := range str2 {
+		// fmt.Println("ITEM: ", item)
+		str1 = item.(map[string]interface {})
+		metadata := str1["metadata"].(map[string]interface{})
+		// fmt.Println("TYPE: ", metadata["type"])
+		// fmt.Println("BASENAME: ", metadata["basename"])
+		if metadata["type"].(string) == "node" {
+			result.Type = metadata["type"].(string)
+			result.Name = metadata["name"].(string)
+			result.Basename = metadata["basename"].(string)
+			fmt.Println("FINAL RESULT:\n", result)
+			return result
+		}
+
+	}
+	return result
 }

@@ -1,12 +1,8 @@
-FROM ubuntu:20.10 as basegoflux
+FROM ubuntu:latest as basegoflux
 
-ENV TZ="America/Los_Angeles"
-ENV DEBIAN_FRONTEND="noninteractive"
-RUN apt-get update #&& yes | unminimize  
+RUN apt -y update && apt -y upgrade && apt -y clean && apt -y autoremove
 
-RUN apt-get -y upgrade && apt-get -y clean && apt-get -y autoremove
-
-RUN apt-get -y --no-install-recommends install \
+RUN DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends tzdata && apt -y --no-install-recommends install \
     vim \
     less \
     libc6-dev \
@@ -43,7 +39,7 @@ RUN apt-get -y --no-install-recommends install \
     aspell \
     aspell-en \
     valgrind \
-    libmpich-dev && apt-get -y clean  && apt-get -y autoremove
+    libmpich-dev && apt -y clean  && apt -y autoremove
 
 RUN \
    echo 'alias python="/usr/bin/python3.8"' >> /root/.bashrc && \
@@ -54,14 +50,12 @@ RUN \
    echo 'set number' >> /root/.vimrc 
 
 # Remove python2
-RUN apt-get purge -y python2.7-minimal
+RUN apt purge -y python2.7-minimal
 # You already have Python3 but
 # don't care about the version
 RUN ln -s /usr/bin/python3 /usr/bin/python
-RUN apt-get install -y python3-pip && apt-get -y clean  && apt-get -y autoremove # && ln -s /usr/bin/pip3 /usr/bin/pip
- 
-#Fluxion
-RUN apt-get -y --no-install-recommends install \
+RUN apt install -y python3-pip \
+    &&  apt -y --no-install-recommends install \
     libhwloc-dev \
     libboost-dev \
     libboost-system-dev \
@@ -71,50 +65,120 @@ RUN apt-get -y --no-install-recommends install \
     libxml2-dev \
     libyaml-cpp-dev \ 
     python3-yaml \
-    pkg-config && apt-get -y clean  && apt-get -y autoremove
+    libedit-dev \
+    pkg-config && apt -y clean  && apt -y autoremove
 
 RUN cd /root/ && mkdir flux-install
 WORKDIR /root/
-RUN git clone https://github.com/flux-framework/flux-core.git --branch v0.25.0 --single-branch 
+RUN git clone https://github.com/flux-framework/flux-core.git 
+
 RUN cd /root/flux-core/ && ./autogen.sh && PYTHON_VERSION=3.8 ./configure --prefix=/root/flux-install \ 
-    && make && make install && cd /root && rm -rf /root/flux-core
- 
-RUN cd /root/ && git clone https://github.com/cmisale/flux-sched.git --branch gobind-dev --single-branch
-WORKDIR /root/flux-sched/
-ENV PATH "/root/flux-install/bin:$PATH"
-ENV LD_LIBRARY_PATH "/root/flux-install/lib/flux:/root/flux-install/lib"
-RUN flux keygen
-RUN ./autogen.sh && PYTHON_VERSION=3.8 ./configure --prefix=/root/flux-install && make -j && make install
-# Install go 15
+    && make -j && make install && cd /root && rm -rf /root/flux-core
+
+# Install go 16
 WORKDIR /home
-RUN wget https://dl.google.com/go/go1.15.2.linux-amd64.tar.gz  && tar -xvf go1.15.2.linux-amd64.tar.gz && \
-         mv go /usr/local  &&  rm go1.15.2.linux-amd64.tar.gz
+RUN wget https://dl.google.com/go/go1.16.10.linux-amd64.tar.gz  && tar -xvf go1.16.10.linux-amd64.tar.gz && \
+         mv go /usr/local  &&  rm go1.16.10.linux-amd64.tar.gz
 
 ENV GOROOT "/usr/local/go"
 ENV GOPATH "/go"
 ENV PATH "$GOROOT/bin:$PATH"
-# WORKDIR /root/flux-sched/
 RUN mkdir -p /go/src
-RUN cp -r /root/flux-sched/resource/hlapi/bindings/go/src/fluxcli /go/src/ && cd /go/src/fluxcli &&  go mod init
-RUN cd /go/src && GOOS=linux CGO_CFLAGS="-I/root/flux-sched/resource/hlapi/bindings/c -I/root/flux-install/include" CGO_LDFLAGS="-L/root/flux-sched/resource/hlapi/bindings/c/.libs -lreapi_cli  -L/root/flux-sched/resource/.libs -lresource -lstdc++ -lczmq -ljansson -lhwloc -lboost_system -L/root/flux-install/lib -lflux-hostlist -lboost_graph -lyaml-cpp" go install -v fluxcli
-RUN cp /root/flux-sched/t/scripts/flux-ion-resource.py /root/flux-install/libexec/flux/cmd/
+
+WORKDIR /root/
+ENV PATH "/root/flux-install/bin:$PATH"
+ENV LD_LIBRARY_PATH "/root/flux-install/lib/flux:/root/flux-install/lib"
+RUN flux keygen
+
+RUN  git clone https://github.com/cmisale/flux-sched.git --branch api-kubeflux --single-branch && \ 
+    cd /root/flux-sched/ \
+	&& ./autogen.sh && PYTHON_VERSION=3.8 ./configure --prefix=/root/flux-install && make -j && make install \
+	&& cp t/data/resource/jgfs/tiny.json /home \
+	&& cp -r resource/hlapi/bindings/c/.libs/* resource/.libs/* /root/flux-install/lib/ \
+	&& cp -r resource/hlapi/bindings/go/src/fluxcli /go/src/ \
+	&& mv  resource/hlapi/bindings /tmp \
+	&& cd /root && rm -rf flux-sched && mkdir -p flux-sched/resource/hlapi && mv /tmp/bindings flux-sched/resource/hlapi
+
+RUN apt purge -y git  python3-dev \
+    python3-cffi \
+    python3-six \
+    python3-yaml \
+    python3-jsonschema \
+    python3-sphinx \
+    python3-pip \
+    python3-setuptools \
+    && apt -y clean && apt -y autoremove
 
 
-WORKDIR /go/src/sigs.k8s.io/scheduler-plugins
-COPY cmd cmd/
-COPY hack hack/
-COPY pkg  pkg/
-COPY test test/
-COPY go.mod .
-COPY go.sum .
-COPY Makefile .
-ARG ARCH
-ARG RELEASE_VERSION
-ENV BUILDENVVAR CGO_CFLAGS="-I/root/flux-sched/resource/hlapi/bindings/c -I/root/flux-install/include" CGO_LDFLAGS="-L/root/flux-sched/resource/hlapi/bindings/c/.libs -lreapi_cli  -L/root/flux-sched/resource/.libs -lresource -lstdc++ -lczmq -ljansson -lhwloc -lboost_system -L/root/flux-install/lib -lflux-hostlist -lboost_graph -lyaml-cpp"
 
-RUN RELEASE_VERSION=${RELEASE_VERSION} make build-scheduler.$ARCH && mv bin/kube-scheduler /bin/
-WORKDIR /bin
-RUN mkdir -p /home/data/jgf/
-RUN mkdir -p /home/data/jobspecs/
-COPY data/jobspecOVER-NFD.yaml /home/data/jobspecs/jobspec-test.yaml
-CMD ["kube-scheduler"]
+# BUILD SHARED LIBRARY
+
+RUN cp -r /go/src/fluxcli /usr/local/go/src/
+WORKDIR /usr/local/go/src/fluxcli
+RUN CGO_CFLAGS="-I/root/flux-sched/resource/hlapi/bindings/c -I/root/flux-install/include" CGO_LDFLAGS="-L/root/flux-install/lib/ -lreapi_cli  -L/root/flux-install/lib/ -lresource -lstdc++ -lczmq -ljansson -lhwloc -lboost_system -L/root/flux-install/lib -lflux-hostlist -lboost_graph -lyaml-cpp" go install -buildmode=shared -linkshared fluxcli
+
+
+
+# BELOW IS NEEDED ONLY TO BUILD THE SCHEDULER PLUGIN
+
+# WORKDIR /go/src 
+# RUN cd fluxcli &&  go mod init fluxcli && go mod tidy &&  GOOS=linux CGO_CFLAGS="-I/root/flux-sched/resource/hlapi/bindings/c -I/root/flux-install/include" CGO_LDFLAGS="-L/root/flux-install/lib/ -lreapi_cli  -L/root/flux-install/lib/ -lresource -lstdc++ -lczmq -ljansson -lhwloc -lboost_system -L/root/flux-install/lib -lflux-hostlist -lboost_graph -lyaml-cpp" go install fluxcli 
+
+
+# WORKDIR /go/src/sigs.k8s.io/scheduler-plugins
+# COPY cmd cmd/
+# COPY hack hack/
+# COPY pkg  pkg/
+# COPY flux-k8s/flux-plugin/kubeflux pkg/kubeflux/
+# COPY test test/
+# COPY go.mod .
+# COPY go.sum .
+# COPY Makefile .
+# ARG ARCH
+# ARG RELEASE_VERSION
+
+# RUN RELEASE_VERSION=${RELEASE_VERSION} make build-scheduler.$ARCH 
+
+# RUN mkdir -p /home/data/jgf/ && mv /home/tiny.json /home/data/jgf/
+
+
+
+# FROM ubuntu
+
+# # Copy Flux libraries and headers
+# COPY --from=basegoflux /root/flux-install /root/flux-install/
+# COPY --from=basegoflux /root/flux-sched/resource/hlapi /root/flux-sched/resource/hlapi/
+# COPY --from=basegoflux /root/flux-install/lib/libflux-hostlist* /usr/local/lib/
+# COPY --from=basegoflux /go/src/fluxcli  /go/src/fluxcli/
+# COPY --from=basegoflux /go/src/sigs.k8s.io/scheduler-plugins/bin/kube-scheduler /bin/kube-scheduler
+# COPY --from=basegoflux /home/data/jgf/ /home/data/jgf/
+
+# # Reinstall dependencies we need
+# #Fluxion
+# RUN  apt -y upgrade && apt -u update && apt -y clean && apt-get -y autoremove
+
+# RUN DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && apt -y --no-install-recommends install \
+#     libhwloc-dev \
+#     libboost-dev \
+#     libboost-system-dev \
+#     libboost-filesystem-dev \
+#     libboost-graph-dev \
+#     libboost-regex-dev \
+#     libxml2-dev \
+#     libyaml-cpp-dev \ 
+#     libsodium-dev \
+#     libzmq3-dev \
+#     libczmq-dev \
+#     uuid-dev \
+#     libjansson-dev \
+#     liblz4-dev \
+#     libhwloc-dev \
+#     libsqlite3-dev \
+#     wget \
+#     make \
+#     libc6-dev  \
+#     lua5.1 liblua5.1-dev lua-posix && apt-get -y clean  && apt-get -y autoremove
+# RUN mkdir -p /home/data/jobspecs/
+# COPY flux-k8s/flux-plugin/manifests/kubeflux/sched-config.yaml /home/sched-config.yaml
+# WORKDIR /bin
+# CMD ["kube-scheduler"]
