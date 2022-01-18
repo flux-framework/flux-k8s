@@ -40,7 +40,7 @@ type Count struct {
 }
 
 type Task struct {
-	Command []string `yaml:"command,flow"`
+	Command string `yaml:"command,flow"`
 	Slot    string   `yaml:"slot"`
 	Counts  Count    `yaml:"count"`
 }

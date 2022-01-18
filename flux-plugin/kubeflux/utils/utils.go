@@ -4,17 +4,26 @@ import (
 	"context"
 	"fmt"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/kubernetes/pkg/scheduler/framework"
-	"k8s.io/kubernetes/pkg/scheduler/metrics"
-	"sigs.k8s.io/scheduler-plugins/pkg/kubeflux/jgf"
-	"time"
+	"kubeflux/jgf"
 	"encoding/json"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/kubernetes"
 )
 
-func CreateJGF(handle framework.Handle, filename string) error {
-	start := time.Now()
+func CreateJGF(filename string) error {
 	ctx := context.Background()
-	clientset := handle.ClientSet()
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		fmt.Println("Error getting InClusterConfig")
+		return err
+	}
+	// creates the clientset
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		fmt.Println("Error getting ClientSet")
+		return err
+	}
+	// clientset := handle.ClientSet()
 	nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	var fluxgraph jgf.Fluxjgf
 	fluxgraph = jgf.InitJGF()
@@ -85,14 +94,10 @@ func CreateJGF(handle framework.Handle, filename string) error {
 		}
 	}
 
-	elapsed := metrics.SinceInSeconds(start)
-	fmt.Println("Time elapsed (CreateJGF) :", elapsed)
 	err = fluxgraph.WriteJGF(filename)
 	if err != nil {
 		return err
 	}
-	elapsed_write := metrics.SinceInSeconds(start)
-	fmt.Println("Time elapsed (CreateJGF write) :", elapsed_write-elapsed)
 	return nil
 
 }
@@ -127,7 +132,7 @@ func ParseAllocResult(allocated string) allocation{
 			result.Type = metadata["type"].(string)
 			result.Name = metadata["name"].(string)
 			result.Basename = metadata["basename"].(string)
-			fmt.Println("FINAL RESULT:\n", result)
+			// fmt.Println("FINAL RESULT:\n", result)
 			return result
 		}
 
