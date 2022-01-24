@@ -144,6 +144,7 @@ WORKDIR /go/src/kubeflux/
 RUN go mod tidy
 RUN make server
 RUN mkdir -p /home/data/jobspecs && mkdir -p /home/data/jgf
+# COPY examples/data/kubecluster.json /home/data/jgf/kubecluster.json
 # BELOW IS NEEDED ONLY TO BUILD THE SCHEDULER PLUGIN
 
 # WORKDIR /go/src 

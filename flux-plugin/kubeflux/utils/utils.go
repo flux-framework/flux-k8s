@@ -10,6 +10,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+
 func CreateJGF(filename string) error {
 	ctx := context.Background()
 	config, err := rest.InClusterConfig()
@@ -39,8 +40,7 @@ func CreateJGF(filename string) error {
 	// sdnCount := 0
 	for node_index, node := range nodes.Items {
 		_, master := node.Labels["node-role.kubernetes.io/master"]
-		_, cp := node.Labels["node-role.kubernetes.io/control-plane"]
-		if !master && !cp {
+		if !master {
 
 			// Check if subnet already exists
 			// Here we build subnets according to IP addresses of nodes.

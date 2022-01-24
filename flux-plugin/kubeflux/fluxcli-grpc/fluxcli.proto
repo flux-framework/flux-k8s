@@ -32,6 +32,7 @@ message MatchRequest {
 message MatchResponse {
     string podID = 1;
     string nodeID = 2;
+    int64 jobID = 3;
 }
 
 

@@ -5,7 +5,6 @@ import (
 	"context"
 	"time"
 	"google.golang.org/grpc"
-	"net"
 	pb "example.com/fluxclient/fluxcli-grpc"
 	"k8s.io/api/core/v1"
 )
@@ -13,31 +12,32 @@ import (
 
 
 func main() {
-	sock := "/tmp/echo.sock"
+	// sock := "/tmp/echo.sock"
 
-	conn, err := grpc.Dial(
-		sock,
-		grpc.WithInsecure(),
-		grpc.WithDialer(func(addr string, timeout time.Duration) (net.Conn, error) {
-			return net.DialTimeout("unix", addr, timeout)
-		}))
+	conn, err := grpc.Dial("127.0.0.1:4242", grpc.WithInsecure())
+	// or with sockets
+	// conn, err := grpc.Dial(
+	// 	sock,
+	// 	grpc.WithInsecure(),
+	// 	grpc.WithDialer(func(addr string, timeout time.Duration) (net.Conn, error) {
+	// 		return net.DialTimeout("unix", addr, timeout)
+	// 	}))
 	if err != nil {
 		fmt.Println("[FluxClient] Error connecting to server: %v", err)
-		return
+		return 
 	}
 	defer conn.Close()
 
-
 	grpcclient := pb.NewFluxcliServiceClient(conn)
 	_, cancel := context.WithTimeout(context.Background(), 200*time.Second)
-	defer cancel()
+	defer cancel()	
 
 	jobspec := &pb.MatchRequest{
 		Ps: &pb.PodSpec{
-			Id:        "podID",
+			Id:        "hello",
 			Container: "fake-busybox",
 			Cpu:  1,
-			// Memory:    1,
+			Memory:    1,
 			// Gpu:       0,
 			// Storage:   0,
 		},
