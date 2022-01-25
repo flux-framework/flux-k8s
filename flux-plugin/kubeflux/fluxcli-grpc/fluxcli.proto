@@ -8,6 +8,7 @@ package fluxcli;
 service FluxcliService {
     // Sends a Match command
     rpc Match(MatchRequest) returns (MatchResponse) {}
+    rpc Cancel(CancelRequest) returns (CancelResponse) {}
     //rpc UpdateNodeList(NodesStatus) returns (JGFResponse) {}
     //rpc GetJGF(JGFRequest) returns (JGFResponse) {}
 }
@@ -35,6 +36,15 @@ message MatchResponse {
     int64 jobID = 3;
 }
 
+message CancelRequest {
+    int64 jobID = 2;
+}
+
+// The Match response message
+message CancelResponse {
+    int64 jobID = 1;
+    int32 error = 2;
+}
 
 // The Nodes/Cluster Update Status
 message NodesStatus {

@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion7
 type FluxcliServiceClient interface {
 	// Sends a Match command
 	Match(ctx context.Context, in *MatchRequest, opts ...grpc.CallOption) (*MatchResponse, error)
+	Cancel(ctx context.Context, in *CancelRequest, opts ...grpc.CallOption) (*CancelResponse, error)
 }
 
 type fluxcliServiceClient struct {
@@ -39,12 +40,22 @@ func (c *fluxcliServiceClient) Match(ctx context.Context, in *MatchRequest, opts
 	return out, nil
 }
 
+func (c *fluxcliServiceClient) Cancel(ctx context.Context, in *CancelRequest, opts ...grpc.CallOption) (*CancelResponse, error) {
+	out := new(CancelResponse)
+	err := c.cc.Invoke(ctx, "/fluxcli.FluxcliService/Cancel", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // FluxcliServiceServer is the server API for FluxcliService service.
 // All implementations must embed UnimplementedFluxcliServiceServer
 // for forward compatibility
 type FluxcliServiceServer interface {
 	// Sends a Match command
 	Match(context.Context, *MatchRequest) (*MatchResponse, error)
+	Cancel(context.Context, *CancelRequest) (*CancelResponse, error)
 	mustEmbedUnimplementedFluxcliServiceServer()
 }
 
@@ -54,6 +65,9 @@ type UnimplementedFluxcliServiceServer struct {
 
 func (UnimplementedFluxcliServiceServer) Match(context.Context, *MatchRequest) (*MatchResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Match not implemented")
+}
+func (UnimplementedFluxcliServiceServer) Cancel(context.Context, *CancelRequest) (*CancelResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Cancel not implemented")
 }
 func (UnimplementedFluxcliServiceServer) mustEmbedUnimplementedFluxcliServiceServer() {}
 
@@ -86,6 +100,24 @@ func _FluxcliService_Match_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _FluxcliService_Cancel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CancelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FluxcliServiceServer).Cancel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/fluxcli.FluxcliService/Cancel",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FluxcliServiceServer).Cancel(ctx, req.(*CancelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // FluxcliService_ServiceDesc is the grpc.ServiceDesc for FluxcliService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -97,7 +129,11 @@ var FluxcliService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Match",
 			Handler:    _FluxcliService_Match_Handler,
 		},
+		{
+			MethodName: "Cancel",
+			Handler:    _FluxcliService_Cancel_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "fluxcli-grpc/fluxcli.proto",
+	Metadata: "kubeflux/fluxcli-grpc/fluxcli.proto",
 }

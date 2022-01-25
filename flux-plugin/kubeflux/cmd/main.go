@@ -72,6 +72,19 @@ func main () {
 	fmt.Printf("[GRPCServer] Exiting\n")
 }
 
+func (s *server) Cancel(ctx context.Context, in *pb.CancelRequest) (*pb.CancelResponse, error) {
+	fmt.Printf("[GRPCServer] Received Cancel request %v\n", in)
+	err := fluxcli.ReapiCliCancel(s.fctx, int64(in.JobID), false)
+	if err < 0 {
+		return nil, errors.New("Error in Cancel")
+	}
+
+	dr := &pb.CancelResponse{JobID: in.JobID, Error: int32(err)}
+	fmt.Printf("[GRPCServer] Sending Cancel response %v\n", dr)
+
+	return dr, nil
+}
+
 func (s *server) Match(ctx context.Context, in *pb.MatchRequest) (*pb.MatchResponse, error) {
 	// currenttime := time.Now()
 	// filename := fmt.Sprintf("/home/data/jobspecs/jobspec-%s-%s.yaml", currenttime.Format(time.RFC3339Nano), in.Ps.Id)
@@ -83,11 +96,9 @@ func (s *server) Match(ctx context.Context, in *pb.MatchRequest) (*pb.MatchRespo
 		return nil, errors.New("Error reading jobspec")
 	}
 
-	fmt.Printf("[GRPCServer] Received request %v\n", in)
-	fmt.Printf("[GRPCServer] string read \n%v\n", string(spec))
+	fmt.Printf("[GRPCServer] Received Match request %v\n", in)
 	reserved, allocated, at, overhead, jobid, fluxerr := fluxcli.ReapiCliMatchAllocate(s.fctx, false, string(spec))
 	fmt.Printf("Errors so far: %s\n", fluxcli.ReapiCliGetErrMsg(s.fctx))
-	printOutput(reserved, allocated, at, overhead, jobid, fluxerr)
 	if fluxerr != 0 {
 		return nil, errors.New("Error in ReapiCliMatchAllocate")
 	}
