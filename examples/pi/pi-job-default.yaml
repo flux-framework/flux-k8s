@@ -11,7 +11,7 @@ spec:
     spec:
       containers:
       - name: pi-test
-        image: localhost:5000/pi:latest # kind with local registry
+        image: quay.io/eduardoarango/pi:ubi8
         resources:
           limits:
             cpu: "12"
