@@ -38,12 +38,10 @@ Ps: &pb.PodSpec{
 		},
 */
 
-func CreateJobSpecYaml(pr *pb.PodSpec/*pr *PodRequest*/, filename string) error {
+func CreateJobSpecYaml(pr *pb.PodSpec, count int32, filename string) error {
 		socket_resources := make([]Resource, 1)
-		// command := pr.Id
 		command := []string{pr.Container}
-		fmt.Printf("[JobSpec] Required memory %v/%v\n", pr.Memory, toGB(pr.Memory))
-		socket_resources[0] = Resource{Type: "core", Count: pr.Cpu}
+		socket_resources[0] = Resource{Type: "core", Count: int64(pr.Cpu)}
 		if pr.Memory > 0 {
 			socket_resources = append(socket_resources, Resource{Type: "memory", Count: pr.Memory})
 		}
@@ -55,26 +53,6 @@ func CreateJobSpecYaml(pr *pb.PodSpec/*pr *PodRequest*/, filename string) error 
 		js := JobSpec{
 			Version: Version{
 				Version: 9999,
-				Resources: []Resource{
-					{
-						Type:  "node",
-						Count: 1,
-						With: []Resource{
-							{
-								Type:  "socket",
-								Count: 1,
-								With: []Resource{
-									{
-										Type:  "slot",
-										Count: 1,
-										Label: "default",
-										With:  socket_resources,
-									},
-								},
-							},
-						},
-					},
-				},
 			},
 			Attributes: Attribute{
 				System{
@@ -92,6 +70,75 @@ func CreateJobSpecYaml(pr *pb.PodSpec/*pr *PodRequest*/, filename string) error 
 				},
 			},
 		}
+
+		slot_resource := make([]Resource, 1)
+		slot_resource[0] = Resource{
+			Type: "slot",
+			Count: int64(count),
+			Label: "default",
+			With: socket_resources,
+		}
+
+		// if count == 1 {
+		// 	node_resource := make([]Resource, 1)
+		// 	node_resource[0] = Resource{
+		// 		Type: "node", 
+		// 		Count: 1,
+		// 		With: []Resource{
+		// 			{
+		// 				Type: "socket", 
+		// 				Count: 1,
+		// 				With: slot_resource,
+		// 			},
+		// 		},
+		// 	}
+
+		// 	js.Version.Resources = node_resource
+		// } else {
+			js.Version.Resources = slot_resource
+		// }
+		
+		
+		// js := JobSpec{
+		// 	Version: Version{
+		// 		Version: 9999,
+		// 		Resources: []Resource{
+		// 			{
+		// 				Type:  "node",
+		// 				Count: 1,
+		// 				With: []Resource{
+		// 					{
+		// 						Type:  "socket",
+		// 						Count: 1,
+		// 						With: []Resource{
+		// 							{
+		// 								Type:  "slot",
+		// 								Count: int64(count),
+		// 								Label: "default",
+		// 								With:  socket_resources,
+		// 							},
+		// 						},
+		// 					},
+		// 				},
+		// 			},
+		// 		},
+		// 	},
+		// 	Attributes: Attribute{
+		// 		System{
+		// 			Duration: 3600,
+		// 		},
+		// 	},
+		// 	Tasks: []Task{
+		// 		{
+		// 			// Command: "[\""+command+"\"]",
+		// 			Command: command,
+		// 			Slot:    "default",
+		// 			Counts: Count{
+		// 				PerSlot: 1,
+		// 			},
+		// 		},
+		// 	},
+		// }
 		yamlbytes, err := yaml.Marshal(&js)
 		if err != nil {
 			log.Fatalf("[JobSpec] yaml.Marshal failed with '%s'\n", err)

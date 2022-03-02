@@ -103,15 +103,16 @@ func CreateJGF(filename string) error {
 }
 
 type allocation struct {
-	Type string
-	Name string
-	Basename string
+	Type 		string
+	Name 		string
+	Basename 	string
+	CoreCount	int
 }
 
-func ParseAllocResult(allocated string) allocation{
+func ParseAllocResult(allocated string) []allocation{
 	var dat map[string]interface{}
-	var result allocation 
-
+	result := make([]allocation, 0)
+	corecount := 0
 	if err := json.Unmarshal([]byte(allocated), &dat); err != nil {
         panic(err)
     }
@@ -122,20 +123,30 @@ func ParseAllocResult(allocated string) allocation{
 	str1 := nodes.(map[string]interface {})
     // fmt.Println("GET NODES:\n", str1["nodes"])
 	str2 := str1["nodes"].([]interface {})
+	// fmt.Println("NODES:\n", len(str2))
 	for _, item := range str2 {
 		// fmt.Println("ITEM: ", item)
 		str1 = item.(map[string]interface {})
 		metadata := str1["metadata"].(map[string]interface{})
 		// fmt.Println("TYPE: ", metadata["type"])
+		if metadata["type"].(string) == "core" {
+			corecount = corecount + 1
+		}
 		// fmt.Println("BASENAME: ", metadata["basename"])
 		if metadata["type"].(string) == "node" {
-			result.Type = metadata["type"].(string)
-			result.Name = metadata["name"].(string)
-			result.Basename = metadata["basename"].(string)
-			// fmt.Println("FINAL RESULT:\n", result)
-			return result
+			result = append(result, allocation{
+				Type : metadata["type"].(string),
+				Name : metadata["name"].(string),
+				Basename : metadata["basename"].(string),
+				CoreCount : corecount,
+			})
+			corecount = 0
+			// result.Type = metadata["type"].(string)
+			// result.Name = metadata["name"].(string)
+			// result.Basename = metadata["basename"].(string)
+			// return result
 		}
-
 	}
+	fmt.Println("FINAL NODE RESULT:\n", result)
 	return result
 }

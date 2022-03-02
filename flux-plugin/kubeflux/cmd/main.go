@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"flag"
 	pb "kubeflux/fluxcli-grpc"
 	"net"
 	"google.golang.org/grpc/keepalive"
@@ -33,7 +34,8 @@ type server struct{
 
 func main () {
 	fmt.Println("This is the fluxion grpc server")
-
+	policy := flag.String("policy", "", "Match policy")
+	flag.Parse()
 	fctx := fluxcli.NewReapiCli()
 	fmt.Println("Created cli context ", fctx)
 	fmt.Printf("%+v\n", fctx)
@@ -49,6 +51,11 @@ func main () {
 		return
 	}
 	
+	if *policy != "" {
+		p :=string("{\"matcher_policy\": \"" + *policy + "\"}")
+		fmt.Println("Match policy: ", p)
+	}
+
 	fluxcli.ReapiCliInit(fctx, string(jgf), "{}")
 
 
@@ -89,7 +96,7 @@ func (s *server) Match(ctx context.Context, in *pb.MatchRequest) (*pb.MatchRespo
 	// currenttime := time.Now()
 	// filename := fmt.Sprintf("/home/data/jobspecs/jobspec-%s-%s.yaml", currenttime.Format(time.RFC3339Nano), in.Ps.Id)
 	filename := "/home/data/jobspecs/jobspec.yaml"
-	jobspec.CreateJobSpecYaml(in.Ps, filename)
+	jobspec.CreateJobSpecYaml(in.Ps, in.Count, filename)
 
 	spec, err := ioutil.ReadFile(filename)
 	if err != nil {
@@ -109,11 +116,16 @@ func (s *server) Match(ctx context.Context, in *pb.MatchRequest) (*pb.MatchRespo
 
 	printOutput(reserved, allocated, at, overhead, jobid, fluxerr)
 
-	node := utils.ParseAllocResult(allocated)
-	nodename := node.Basename
-	fmt.Println("nodename ", nodename)
+	nodetasks := utils.ParseAllocResult(allocated)
 	
-	mr := &pb.MatchResponse{PodID: in.Ps.Id, NodeID: nodename, JobID: int64(jobid)}
+	nodetaskslist := make([]*pb.NodeAlloc, len(nodetasks))
+	for i, result := range nodetasks {
+		nodetaskslist[i] = &pb.NodeAlloc {
+			NodeID: result.Basename,
+			Tasks: int32(result.CoreCount)/in.Ps.Cpu,
+		}
+	}
+	mr := &pb.MatchResponse{PodID: in.Ps.Id, Nodelist: nodetaskslist, JobID: int64(jobid)}
 	fmt.Printf("[GRPCServer] Response %v \n", mr)
 	return mr, nil
 }

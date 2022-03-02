@@ -9,14 +9,12 @@ service FluxcliService {
     // Sends a Match command
     rpc Match(MatchRequest) returns (MatchResponse) {}
     rpc Cancel(CancelRequest) returns (CancelResponse) {}
-    //rpc UpdateNodeList(NodesStatus) returns (JGFResponse) {}
-    //rpc GetJGF(JGFRequest) returns (JGFResponse) {}
 }
 
 message PodSpec {
     string id = 1;
     string container = 2;
-    int64 cpu = 3;
+    int32 cpu = 3;
     int64 memory = 4;
     int64 gpu = 5;
     int64 storage = 6; 
@@ -27,12 +25,19 @@ message PodSpec {
 message MatchRequest {
     PodSpec ps = 1;
     string request = 2;
+    int32 count = 3;
+}
+
+// The Nodes/Cluster Update Status
+message NodeAlloc {
+    string nodeID = 1;
+    int32 tasks = 2;
 }
 
 // The Match response message
 message MatchResponse {
     string podID = 1;
-    string nodeID = 2;
+    repeated NodeAlloc nodelist = 2;
     int64 jobID = 3;
 }
 
@@ -46,10 +51,7 @@ message CancelResponse {
     int32 error = 2;
 }
 
-// The Nodes/Cluster Update Status
-message NodesStatus {
-    repeated NodeStatus nodesList = 1;
-}
+
 
 // The Nodes/Cluster Update Status
 message NodeStatus {
