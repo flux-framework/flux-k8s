@@ -4,10 +4,14 @@ import (
 	"context"
 	"fmt"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	corev1 "k8s.io/api/core/v1"
 	"kubeflux/jgf"
 	"encoding/json"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/apimachinery/pkg/fields"
+	resourcehelper "k8s.io/kubectl/pkg/util/resource"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 
@@ -24,8 +28,8 @@ func CreateJGF(filename string) error {
 		fmt.Println("Error getting ClientSet")
 		return err
 	}
-	// clientset := handle.ClientSet()
 	nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	
 	var fluxgraph jgf.Fluxjgf
 	fluxgraph = jgf.InitJGF()
 	// subnets := make(map[string]string)
@@ -39,9 +43,19 @@ func CreateJGF(filename string) error {
 	fmt.Println("Number nodes ", len(nodes.Items))
 	// sdnCount := 0
 	for node_index, node := range nodes.Items {
-		_, master := node.Labels["node-role.kubernetes.io/master"]
-		if !master {
-
+		_, worker := node.Labels["node-role.kubernetes.io/worker"]
+		if worker {
+			fieldselector, err := fields.ParseSelector("spec.nodeName=" + node.GetName() + ",status.phase!=" + string(corev1.PodSucceeded) + ",status.phase!=" + string(corev1.PodFailed))
+			if err != nil {
+				return err
+			}
+			pods, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
+				FieldSelector: fieldselector.String(),
+			})
+			if err != nil {
+				return err
+			}
+			// fmt.Println("Node ", node.GetName(), " has pods ", pods)
 			// Check if subnet already exists
 			// Here we build subnets according to IP addresses of nodes.
 			// This was for GROMACS, therefore I comment that out and go back
@@ -61,9 +75,22 @@ func CreateJGF(filename string) error {
 			// 	fluxgraph.MakeEdge(subnet, cluster, "in")
 			// }
 			// subnet := subnets[subnetName]
+			
+		
+			reqs := computeTotalRequests(pods)
+			cpuReqs := reqs[corev1.ResourceCPU]
+			// fractionCpuReqs := float64(0)
+			// if node.Status.Allocatable.Cpu().MilliValue() != 0 {
+			// 	fractionCpuReqs = float64(cpuReqs.MilliValue()) / float64(node.Status.Allocatable.Cpu().MilliValue()) * 100
+			// }
+			// fmt.Println("Node ", node.GetName(), " cpuReqs ", cpuReqs.MilliValue())
+			avail := node.Status.Allocatable.Cpu().MilliValue()
+			// fmt.Println("Node ", node.GetName(), " avail cpu ", avail, "/", node.Status.Allocatable.Cpu().MilliValue())
+			// fmt.Println("Node ", node.GetName(), " occupied cpu ", fractionCpuReqs)
+			totalcpu := int64((avail-cpuReqs.MilliValue())/1000)
+			fmt.Println("Node ", node.GetName(), " flux cpu ", totalcpu)
 
-			totalcpu, _ := node.Status.Capacity.Cpu().AsInt64()
-			totalmem, _ := node.Status.Capacity.Memory().AsInt64()
+			totalmem, _ := node.Status.Allocatable.Memory().AsInt64()
 			workernode := fluxgraph.MakeNode(node_index, false, node.Name)
 			fluxgraph.MakeEdge(rack, workernode, "contains")
 			fluxgraph.MakeEdge(workernode, rack, "in")
@@ -101,6 +128,31 @@ func CreateJGF(filename string) error {
 	return nil
 
 }
+
+func computeTotalRequests(podList *corev1.PodList) (total map[corev1.ResourceName]resource.Quantity) {
+	total = map[corev1.ResourceName]resource.Quantity{}
+	for _, pod := range podList.Items {
+		podReqs, _ := resourcehelper.PodRequestsAndLimits(&pod)
+		for podReqName, podReqValue := range podReqs {
+			if v, ok := total[podReqName]; !ok {
+				total[podReqName] = podReqValue
+			} else {
+				v.Add(podReqValue)
+				total[podReqName] = v
+			}
+		}
+		// for podLimitName, podLimitValue := range podLimits {
+		// 	if v, ok := total[podLimitName]; !ok {
+		// 		total[podLimitName] = podLimitValue
+		// 	} else {
+		// 		v.Add(podLimitValue)
+		// 		total[podLimitName] = v
+		// 	}
+		// }
+	}
+	return
+}
+
 
 type allocation struct {
 	Type 		string
