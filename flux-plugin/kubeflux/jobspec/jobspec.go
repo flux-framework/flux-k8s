@@ -16,70 +16,16 @@ limitations under the License.
 package jobspec
 
 import (
-	// "errors"
 	"fmt"
 	"log"
 	"math"
 	"os"
-	"strings"
-
-	"strconv"
+	pb "kubeflux/fluxcli-grpc"
 
 	"gopkg.in/yaml.v2"
-	v1 "k8s.io/api/core/v1"
 )
 
-type PodRequest struct {
-	ID string
-	// Pod        *v1.Pod
-	Containers []v1.Container
-	CPU        []int64
-	Memory     []int64
-	Gpu        []int64
-	Storage    []int64
-	Labels     map[string]string
-}
 
-func InspectPodInfo(pod *v1.Pod) *PodRequest {
-	pr := new(PodRequest)
-	pr.ID = pod.Name
-	// pr.Pod = pod
-	pr.Containers = pod.Spec.Containers
-	numcontainers := len(pr.Containers)
-	pr.CPU = make([]int64, numcontainers)
-	pr.Memory = make([]int64, numcontainers)
-	pr.Gpu = make([]int64, numcontainers)
-	pr.Storage = make([]int64, numcontainers)
-	fmt.Println("[JobSpec] pod labels ", pod.Labels)
-	pr.Labels = pod.Labels
-
-	for i, cont := range pr.Containers {
-		// fmt.Printf("[FML] \n%v\n", cont)
-		specRequests := cont.Resources.Requests
-		specLimits := cont.Resources.Limits
-
-		if specRequests.Cpu().Value() == 0 {
-			pr.CPU[i] = 1
-		} else {
-			pr.CPU[i] = specRequests.Cpu().Value()
-		}
-		if specRequests.Memory().Value() > 0 {
-			pr.Memory[i] = specRequests.Memory().Value()
-		}
-		gpu := specLimits["nvidia.com/gpu"]
-		pr.Gpu[i] = gpu.Value()
-		pr.Storage[i] = specRequests.StorageEphemeral().Value()
-		//for key := range pod.Spec.Containers[0].Resources.Requests {
-		//	fmt.Printf("Requests key %v %p\n", key, key)
-		//}
-
-		fmt.Printf("[Jobspec] Pod spec: CPU %v/%v-milli, memory %v/%v-milli, GPU %v, storage %v\n", pr.CPU[i], specRequests.Cpu().MilliValue(),
-			pr.Memory[i], specRequests.Memory().MilliValue(), pr.Gpu[i], pr.Storage[i])
-	}
-
-	fmt.Println("[Jobspec] Node selector: ", pod.Spec.NodeSelector)
-	return pr
-}
 
 /*
 Ps: &pb.PodSpec{
@@ -92,56 +38,21 @@ Ps: &pb.PodSpec{
 		},
 */
 
-func CreateJobSpecYaml(pr *PodRequest, filename string) error {
-	for i := 0; i < len(pr.Containers); i++ {
+func CreateJobSpecYaml(pr *pb.PodSpec, count int32, filename string) error {
 		socket_resources := make([]Resource, 1)
-		command := pr.Containers[i].Command
-		fmt.Printf("[JobSpec] Required memory %v/%v\n", pr.Memory[i], toGB(pr.Memory[i]))
-		socket_resources[0] = Resource{Type: "core", Count: pr.CPU[i]}
-		if len(pr.Labels) > 0 {
-			r := make([]Resource, 0)
-			for key, val := range pr.Labels {
-				if strings.Contains(key, "nfd") {
-					count, _ := strconv.Atoi(val)
-
-					r = append(r, Resource{Type: strings.Split(key,".")[1], Count: int64(count)})
-				}
-			}
-			if len(r) > 0 {
-				socket_resources[0].With = r
-			}
-		}
-		if pr.Memory[i] > 0 {
-			socket_resources = append(socket_resources, Resource{Type: "memory", Count: pr.Memory[i]})
+		command := []string{pr.Container}
+		socket_resources[0] = Resource{Type: "core", Count: int64(pr.Cpu)}
+		if pr.Memory > 0 {
+			socket_resources = append(socket_resources, Resource{Type: "memory", Count: pr.Memory})
 		}
 
-		if pr.Gpu[i] > 0 {
-			socket_resources = append(socket_resources, Resource{Type: "gpu", Count: pr.Gpu[i]})
+		if pr.Gpu > 0 {
+			socket_resources = append(socket_resources, Resource{Type: "gpu", Count: pr.Gpu})
 		}
 
 		js := JobSpec{
 			Version: Version{
-				Version: 1,
-				Resources: []Resource{
-					{
-						Type:  "node",
-						Count: 1,
-						With: []Resource{
-							{
-								Type:  "socket",
-								Count: 1,
-								With: []Resource{
-									{
-										Type:  "slot",
-										Count: 1,
-										Label: "default",
-										With:  socket_resources,
-									},
-								},
-							},
-						},
-					},
-				},
+				Version: 9999,
 			},
 			Attributes: Attribute{
 				System{
@@ -150,6 +61,7 @@ func CreateJobSpecYaml(pr *PodRequest, filename string) error {
 			},
 			Tasks: []Task{
 				{
+					// Command: "[\""+command+"\"]",
 					Command: command,
 					Slot:    "default",
 					Counts: Count{
@@ -158,6 +70,75 @@ func CreateJobSpecYaml(pr *PodRequest, filename string) error {
 				},
 			},
 		}
+
+		slot_resource := make([]Resource, 1)
+		slot_resource[0] = Resource{
+			Type: "slot",
+			Count: int64(count),
+			Label: "default",
+			With: socket_resources,
+		}
+
+		// if count == 1 {
+		// 	node_resource := make([]Resource, 1)
+		// 	node_resource[0] = Resource{
+		// 		Type: "node", 
+		// 		Count: 1,
+		// 		With: []Resource{
+		// 			{
+		// 				Type: "socket", 
+		// 				Count: 1,
+		// 				With: slot_resource,
+		// 			},
+		// 		},
+		// 	}
+
+		// 	js.Version.Resources = node_resource
+		// } else {
+			js.Version.Resources = slot_resource
+		// }
+		
+		
+		// js := JobSpec{
+		// 	Version: Version{
+		// 		Version: 9999,
+		// 		Resources: []Resource{
+		// 			{
+		// 				Type:  "node",
+		// 				Count: 1,
+		// 				With: []Resource{
+		// 					{
+		// 						Type:  "socket",
+		// 						Count: 1,
+		// 						With: []Resource{
+		// 							{
+		// 								Type:  "slot",
+		// 								Count: int64(count),
+		// 								Label: "default",
+		// 								With:  socket_resources,
+		// 							},
+		// 						},
+		// 					},
+		// 				},
+		// 			},
+		// 		},
+		// 	},
+		// 	Attributes: Attribute{
+		// 		System{
+		// 			Duration: 3600,
+		// 		},
+		// 	},
+		// 	Tasks: []Task{
+		// 		{
+		// 			// Command: "[\""+command+"\"]",
+		// 			Command: command,
+		// 			Slot:    "default",
+		// 			Counts: Count{
+		// 				PerSlot: 1,
+		// 			},
+		// 		},
+		// 	},
+		// }
 		yamlbytes, err := yaml.Marshal(&js)
 		if err != nil {
 			log.Fatalf("[JobSpec] yaml.Marshal failed with '%s'\n", err)
@@ -182,7 +163,6 @@ func CreateJobSpecYaml(pr *PodRequest, filename string) error {
 			log.Fatalf("[JobSpec] Couldn't write yaml file!!\n")
 			return err
 		}
-	}
 	return nil
 }
 

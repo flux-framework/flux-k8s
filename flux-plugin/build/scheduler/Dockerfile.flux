@@ -94,6 +94,7 @@ RUN  git clone https://github.com/cmisale/flux-sched.git --branch api-kubeflux -
     cd /root/flux-sched/ \
 	&& ./autogen.sh && PYTHON_VERSION=3.8 ./configure --prefix=/root/flux-install && make -j && make install \
 	&& cp t/data/resource/jgfs/tiny.json /home \
+    && cp t/data/resource/jobspecs/basics/test001.yaml /home \
 	&& cp -r resource/hlapi/bindings/c/.libs/* resource/.libs/* /root/flux-install/lib/ \
 	&& cp -r resource/hlapi/bindings/go/src/fluxcli /go/src/ \
 	&& mv  resource/hlapi/bindings /tmp \
@@ -111,14 +112,39 @@ RUN apt purge -y git  python3-dev \
 
 
 
+
+
 # BUILD SHARED LIBRARY
 
-RUN cp -r /go/src/fluxcli /usr/local/go/src/
-WORKDIR /usr/local/go/src/fluxcli
-RUN CGO_CFLAGS="-I/root/flux-sched/resource/hlapi/bindings/c -I/root/flux-install/include" CGO_LDFLAGS="-L/root/flux-install/lib/ -lreapi_cli  -L/root/flux-install/lib/ -lresource -lstdc++ -lczmq -ljansson -lhwloc -lboost_system -L/root/flux-install/lib -lflux-hostlist -lboost_graph -lyaml-cpp" go install -buildmode=shared -linkshared fluxcli
+# RUN cp -r /go/src/fluxcli /usr/local/go/src/
+# WORKDIR /usr/local/go/src/fluxcli
 
 
 
+# RUN CGO_CFLAGS="-I/root/flux-sched/resource/hlapi/bindings/c -I/root/flux-install/include" CGO_LDFLAGS="-L/root/flux-install/lib/ -lreapi_cli  -L/root/flux-install/lib/ -lresource -lstdc++ -lczmq -ljansson -lhwloc -lboost_system -L/root/flux-install/lib -lflux-hostlist -lboost_graph -lyaml-cpp" go install -buildmode=shared -linkshared fluxcli
+
+WORKDIR /go/src 
+RUN cd fluxcli &&  go mod init fluxcli && go mod tidy &&  GOOS=linux CGO_CFLAGS="-I/root/flux-sched/resource/hlapi/bindings/c -I/root/flux-install/include" CGO_LDFLAGS="-L/root/flux-install/lib/ -lreapi_cli  -L/root/flux-install/lib/ -lresource -lstdc++ -lczmq -ljansson -lhwloc -lboost_system -L/root/flux-install/lib -lflux-hostlist -lboost_graph -lyaml-cpp" go install fluxcli 
+
+RUN apt install -y protobuf-compiler curl && \
+ go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.26 && \ 
+ go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.1
+
+ENV PATH "$PATH:/go/bin"
+RUN go get google.golang.org/protobuf/reflect/protoreflect@v1.26.0 && \
+go get google.golang.org/protobuf/runtime/protoimpl@v1.26.0
+
+COPY kubeflux /go/src/kubeflux/
+COPY Makefile /go/src/kubeflux/
+WORKDIR /go/src/kubeflux/
+# RUN  protoc --go_out=. --go_opt=paths=source_relative \
+#     --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+#     fluxcli-grpc/fluxcli.proto
+
+RUN go mod tidy
+RUN make server
+RUN mkdir -p /home/data/jobspecs && mkdir -p /home/data/jgf
+# COPY examples/data/kubecluster.json /home/data/jgf/kubecluster.json
 # BELOW IS NEEDED ONLY TO BUILD THE SCHEDULER PLUGIN
 
 # WORKDIR /go/src 

@@ -4,18 +4,32 @@ import (
 	"context"
 	"fmt"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/kubernetes/pkg/scheduler/framework"
-	"k8s.io/kubernetes/pkg/scheduler/metrics"
-	"sigs.k8s.io/scheduler-plugins/pkg/kubeflux/jgf"
-	"time"
+	corev1 "k8s.io/api/core/v1"
+	"kubeflux/jgf"
 	"encoding/json"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/apimachinery/pkg/fields"
+	resourcehelper "k8s.io/kubectl/pkg/util/resource"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-func CreateJGF(handle framework.Handle, filename string) error {
-	start := time.Now()
+
+func CreateJGF(filename string) error {
 	ctx := context.Background()
-	clientset := handle.ClientSet()
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		fmt.Println("Error getting InClusterConfig")
+		return err
+	}
+	// creates the clientset
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		fmt.Println("Error getting ClientSet")
+		return err
+	}
 	nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	
 	var fluxgraph jgf.Fluxjgf
 	fluxgraph = jgf.InitJGF()
 	// subnets := make(map[string]string)
@@ -29,10 +43,19 @@ func CreateJGF(handle framework.Handle, filename string) error {
 	fmt.Println("Number nodes ", len(nodes.Items))
 	// sdnCount := 0
 	for node_index, node := range nodes.Items {
-		_, master := node.Labels["node-role.kubernetes.io/master"]
-		_, cp := node.Labels["node-role.kubernetes.io/control-plane"]
-		if !master && !cp {
-
+		_, worker := node.Labels["node-role.kubernetes.io/worker"]
+		if worker {
+			fieldselector, err := fields.ParseSelector("spec.nodeName=" + node.GetName() + ",status.phase!=" + string(corev1.PodSucceeded) + ",status.phase!=" + string(corev1.PodFailed))
+			if err != nil {
+				return err
+			}
+			pods, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
+				FieldSelector: fieldselector.String(),
+			})
+			if err != nil {
+				return err
+			}
+			// fmt.Println("Node ", node.GetName(), " has pods ", pods)
 			// Check if subnet already exists
 			// Here we build subnets according to IP addresses of nodes.
 			// This was for GROMACS, therefore I comment that out and go back
@@ -52,9 +75,22 @@ func CreateJGF(handle framework.Handle, filename string) error {
 			// 	fluxgraph.MakeEdge(subnet, cluster, "in")
 			// }
 			// subnet := subnets[subnetName]
+			
+		
+			reqs := computeTotalRequests(pods)
+			cpuReqs := reqs[corev1.ResourceCPU]
+			// fractionCpuReqs := float64(0)
+			// if node.Status.Allocatable.Cpu().MilliValue() != 0 {
+			// 	fractionCpuReqs = float64(cpuReqs.MilliValue()) / float64(node.Status.Allocatable.Cpu().MilliValue()) * 100
+			// }
+			// fmt.Println("Node ", node.GetName(), " cpuReqs ", cpuReqs.MilliValue())
+			avail := node.Status.Allocatable.Cpu().MilliValue()
+			// fmt.Println("Node ", node.GetName(), " avail cpu ", avail, "/", node.Status.Allocatable.Cpu().MilliValue())
+			// fmt.Println("Node ", node.GetName(), " occupied cpu ", fractionCpuReqs)
+			totalcpu := int64((avail-cpuReqs.MilliValue())/1000)
+			fmt.Println("Node ", node.GetName(), " flux cpu ", totalcpu)
 
-			totalcpu, _ := node.Status.Capacity.Cpu().AsInt64()
-			totalmem, _ := node.Status.Capacity.Memory().AsInt64()
+			totalmem, _ := node.Status.Allocatable.Memory().AsInt64()
 			workernode := fluxgraph.MakeNode(node_index, false, node.Name)
 			fluxgraph.MakeEdge(rack, workernode, "contains")
 			fluxgraph.MakeEdge(workernode, rack, "in")
@@ -85,28 +121,50 @@ func CreateJGF(handle framework.Handle, filename string) error {
 		}
 	}
 
-	elapsed := metrics.SinceInSeconds(start)
-	fmt.Println("Time elapsed (CreateJGF) :", elapsed)
 	err = fluxgraph.WriteJGF(filename)
 	if err != nil {
 		return err
 	}
-	elapsed_write := metrics.SinceInSeconds(start)
-	fmt.Println("Time elapsed (CreateJGF write) :", elapsed_write-elapsed)
 	return nil
 
 }
 
-type allocation struct {
-	Type string
-	Name string
-	Basename string
+func computeTotalRequests(podList *corev1.PodList) (total map[corev1.ResourceName]resource.Quantity) {
+	total = map[corev1.ResourceName]resource.Quantity{}
+	for _, pod := range podList.Items {
+		podReqs, _ := resourcehelper.PodRequestsAndLimits(&pod)
+		for podReqName, podReqValue := range podReqs {
+			if v, ok := total[podReqName]; !ok {
+				total[podReqName] = podReqValue
+			} else {
+				v.Add(podReqValue)
+				total[podReqName] = v
+			}
+		}
+		// for podLimitName, podLimitValue := range podLimits {
+		// 	if v, ok := total[podLimitName]; !ok {
+		// 		total[podLimitName] = podLimitValue
+		// 	} else {
+		// 		v.Add(podLimitValue)
+		// 		total[podLimitName] = v
+		// 	}
+		// }
+	}
+	return
 }
 
-func ParseAllocResult(allocated string) allocation{
-	var dat map[string]interface{}
-	var result allocation 
 
+type allocation struct {
+	Type 		string
+	Name 		string
+	Basename 	string
+	CoreCount	int
+}
+
+func ParseAllocResult(allocated string) []allocation{
+	var dat map[string]interface{}
+	result := make([]allocation, 0)
+	corecount := 0
 	if err := json.Unmarshal([]byte(allocated), &dat); err != nil {
         panic(err)
     }
@@ -117,20 +175,30 @@ func ParseAllocResult(allocated string) allocation{
 	str1 := nodes.(map[string]interface {})
     // fmt.Println("GET NODES:\n", str1["nodes"])
 	str2 := str1["nodes"].([]interface {})
+	// fmt.Println("NODES:\n", len(str2))
 	for _, item := range str2 {
 		// fmt.Println("ITEM: ", item)
 		str1 = item.(map[string]interface {})
 		metadata := str1["metadata"].(map[string]interface{})
 		// fmt.Println("TYPE: ", metadata["type"])
+		if metadata["type"].(string) == "core" {
+			corecount = corecount + 1
+		}
 		// fmt.Println("BASENAME: ", metadata["basename"])
 		if metadata["type"].(string) == "node" {
-			result.Type = metadata["type"].(string)
-			result.Name = metadata["name"].(string)
-			result.Basename = metadata["basename"].(string)
-			fmt.Println("FINAL RESULT:\n", result)
-			return result
+			result = append(result, allocation{
+				Type : metadata["type"].(string),
+				Name : metadata["name"].(string),
+				Basename : metadata["basename"].(string),
+				CoreCount : corecount,
+			})
+			corecount = 0
+			// result.Type = metadata["type"].(string)
+			// result.Name = metadata["name"].(string)
+			// result.Basename = metadata["basename"].(string)
+			// return result
 		}
-
 	}
+	fmt.Println("FINAL NODE RESULT:\n", result)
 	return result
 }
