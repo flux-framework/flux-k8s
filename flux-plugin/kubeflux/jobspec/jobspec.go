@@ -50,6 +50,8 @@ func CreateJobSpecYaml(pr *pb.PodSpec, count int32, filename string) error {
 			socket_resources = append(socket_resources, Resource{Type: "gpu", Count: pr.Gpu})
 		}
 
+		fmt.Println("Labels ", pr.Labels, " ", len(pr.Labels))
+
 		js := JobSpec{
 			Version: Version{
 				Version: 9999,
@@ -79,25 +81,36 @@ func CreateJobSpecYaml(pr *pb.PodSpec, count int32, filename string) error {
 			With: socket_resources,
 		}
 
-		// if count == 1 {
-		// 	node_resource := make([]Resource, 1)
-		// 	node_resource[0] = Resource{
-		// 		Type: "node", 
-		// 		Count: 1,
-		// 		With: []Resource{
-		// 			{
-		// 				Type: "socket", 
-		// 				Count: 1,
-		// 				With: slot_resource,
-		// 			},
-		// 		},
-		// 	}
-
-		// 	js.Version.Resources = node_resource
-		// } else {
-			js.Version.Resources = slot_resource
-		// }
+		if len(pr.Labels) > 0 {
+			for _, label := range pr.Labels {
+				if label == "subnet" {
+					node_resource := make([]Resource, 1)
+					node_resource[0] = Resource{
+						Type: "subnet", 
+						Count: 1,
+						With: []Resource{
+							{
+								Type: "node", 
+								Count: 1,
+								With: []Resource{
+									{
+									Type: "socket", 
+									Count: 1,
+									With: slot_resource,
+									},
+								},
+							},
+						},
+					}
+					js.Version.Resources = node_resource
+				}
+				
+			}
 		
+		}  else {
+			fmt.Println("No labels, going with plain JobSpec")
+			js.Version.Resources = slot_resource
+		}
 		
 		// js := JobSpec{
 		// 	Version: Version{

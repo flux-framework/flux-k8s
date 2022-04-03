@@ -3,6 +3,7 @@ package utils
 import (
 	"context"
 	"fmt"
+	// "strings"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	corev1 "k8s.io/api/core/v1"
 	"kubeflux/jgf"
@@ -33,18 +34,25 @@ func CreateJGF(filename string) error {
 	var fluxgraph jgf.Fluxjgf
 	fluxgraph = jgf.InitJGF()
 	// subnets := make(map[string]string)
-	cluster := fluxgraph.MakeCluster("k8scluster")
-	rack := fluxgraph.MakeRack(0)
 
-	fluxgraph.MakeEdge(cluster, rack, "contains")
-	fluxgraph.MakeEdge(rack, cluster, "in")
+	cluster := fluxgraph.MakeCluster("k8scluster")
+
+	// Rack needs to be disabled when using subnets
+	// rack := fluxgraph.MakeRack(0)
+
+	// fluxgraph.MakeEdge(cluster, rack, "contains")
+	// fluxgraph.MakeEdge(rack, cluster, "in")
 
 	vcores := 0
 	fmt.Println("Number nodes ", len(nodes.Items))
-	// sdnCount := 0
+	var totalAllocCpu int64
+	totalAllocCpu = 0
+	sdnCount := 0
 	for node_index, node := range nodes.Items {
 		_, worker := node.Labels["node-role.kubernetes.io/worker"]
-		if worker {
+		_, fluxnode := node.Labels["kubeflux"]
+
+		if worker || fluxnode {
 			fieldselector, err := fields.ParseSelector("spec.nodeName=" + node.GetName() + ",status.phase!=" + string(corev1.PodSucceeded) + ",status.phase!=" + string(corev1.PodFailed))
 			if err != nil {
 				return err
@@ -57,28 +65,35 @@ func CreateJGF(filename string) error {
 			}
 			// fmt.Println("Node ", node.GetName(), " has pods ", pods)
 			// Check if subnet already exists
-			// Here we build subnets according to IP addresses of nodes.
-			// This was for GROMACS, therefore I comment that out and go back
-			// to build racks. One day, this will be customized by users.
+			// Here we build subnets according to topology.kubernetes.io/zone label
+			subnetName := node.Labels["topology.kubernetes.io/zone"]
+			subnet := fluxgraph.MakeSubnet(sdnCount, subnetName)
+			sdnCount = sdnCount+1
+			fluxgraph.MakeEdge(cluster, subnet, "contains")
+			fluxgraph.MakeEdge(subnet, cluster, "in")
+			/*
+			fmt.Println("Node Addresses ", node.Status.Addresses)
+			lastBin := strings.LastIndex( node.Status.Addresses[0].Address, "." )
 
-			// fmt.Println("Node Addresses ", node.Status.Addresses)
-			// lastBin := strings.LastIndex( node.Status.Addresses[1].Address, "." )
-			// subnetName := node.Status.Addresses[1].Address[0:lastBin]
-			// fmt.Printf("Subnet is: %v\n", subnetName)
+			fmt.Println("Last bin ", lastBin)
+			subnetName := node.Status.Addresses[0].Address[0:lastBin]
+			fmt.Printf("Subnet is: %v\n", subnetName)
 
-			// if _, ok := subnets[subnetName]; !ok {
-			// 	fmt.Println("New subnet ", subnetName)
-			// 	subnet := fluxgraph.MakeSubnet(sdnCount, subnetName)
-			// 	sdnCount = sdnCount+1
-			// 	subnets[subnetName] = subnet
-			// 	fluxgraph.MakeEdge(cluster, subnet, "contains")
-			// 	fluxgraph.MakeEdge(subnet, cluster, "in")
-			// }
-			// subnet := subnets[subnetName]
-			
+			if _, ok := subnets[subnetName]; !ok {
+				fmt.Println("New subnet ", subnetName)
+				subnet := fluxgraph.MakeSubnet(sdnCount, subnetName)
+				sdnCount = sdnCount+1
+				subnets[subnetName] = subnet
+				fluxgraph.MakeEdge(cluster, subnet, "contains")
+				fluxgraph.MakeEdge(subnet, cluster, "in")
+			}
+			subnet := subnets[subnetName]
+			*/
 		
 			reqs := computeTotalRequests(pods)
 			cpuReqs := reqs[corev1.ResourceCPU]
+			// memReqs := reqs[corev1.ResourceMemory]
+			// fmt.Println("Node ", node.GetName(), " memReqs ", memReqs.String())
 			// fractionCpuReqs := float64(0)
 			// if node.Status.Allocatable.Cpu().MilliValue() != 0 {
 			// 	fractionCpuReqs = float64(cpuReqs.MilliValue()) / float64(node.Status.Allocatable.Cpu().MilliValue()) * 100
@@ -87,13 +102,27 @@ func CreateJGF(filename string) error {
 			avail := node.Status.Allocatable.Cpu().MilliValue()
 			// fmt.Println("Node ", node.GetName(), " avail cpu ", avail, "/", node.Status.Allocatable.Cpu().MilliValue())
 			// fmt.Println("Node ", node.GetName(), " occupied cpu ", fractionCpuReqs)
-			totalcpu := int64((avail-cpuReqs.MilliValue())/1000)
+			totalcpu := int64((avail-cpuReqs.MilliValue())/1000) - 1
 			fmt.Println("Node ", node.GetName(), " flux cpu ", totalcpu)
+			totalAllocCpu = totalAllocCpu+totalcpu
+			totalmem := node.Status.Allocatable.Memory().Value()
+			// fmt.Println("Node ", node.GetName(), " totalmem ", totalmem)
+			// reslist := node.Status.Allocatable
+			// resources := make([]corev1.ResourceName, 0, len(reslist))
+			// for resource := range reslist {
+			// 	fmt.Println("resource ", resource)
+			// 	resources = append(resources, resource)
+			// }
+			// for _, resource := range resources {
+			// 	value := reslist[resource]
+				
+			// 	fmt.Printf(" %s:\t%s\n", resource, value.String())
+			// }
 
-			totalmem, _ := node.Status.Allocatable.Memory().AsInt64()
+
 			workernode := fluxgraph.MakeNode(node_index, false, node.Name)
-			fluxgraph.MakeEdge(rack, workernode, "contains")
-			fluxgraph.MakeEdge(workernode, rack, "in")
+			fluxgraph.MakeEdge(subnet, workernode, "contains") // this is rack otherwise
+			fluxgraph.MakeEdge(workernode, subnet, "in") // this is rack otherwise
 
 			socket := fluxgraph.MakeSocket(0, "socket")
 			fluxgraph.MakeEdge(workernode, socket, "contains")
@@ -115,12 +144,18 @@ func CreateJGF(filename string) error {
 			}
 
 			//  MakeMemory(index int, name string, unit string, size int
-			mem := fluxgraph.MakeMemory(0, "memory", "KB", int(totalmem))
-			fluxgraph.MakeEdge(socket, mem, "contains")
-			fluxgraph.MakeEdge(mem, socket, "in")
+			fractionmem := totalmem >> 30
+			for i:=0; i < int(fractionmem); i++ {
+				mem := fluxgraph.MakeMemory(i, "memory", "B", 1<<30)
+				fluxgraph.MakeEdge(socket, mem, "contains")
+				fluxgraph.MakeEdge(mem, socket, "in")
+			}
+			// mem := fluxgraph.MakeMemory(0, "memory", "KB", int(totalmem))
+			// fluxgraph.MakeEdge(socket, mem, "contains")
+			// fluxgraph.MakeEdge(mem, socket, "in")
 		}
 	}
-
+	fmt.Println("Can request at most ", totalAllocCpu, " exclusive cpu")
 	err = fluxgraph.WriteJGF(filename)
 	if err != nil {
 		return err
