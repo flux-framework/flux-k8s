@@ -92,13 +92,13 @@ func CreateJobSpecYaml(pr *pb.PodSpec, count int32, filename string) error {
 							{
 								Type: "node", 
 								Count: 1,
-								With: []Resource{
+								With: slot_resource, /*[]Resource{
 									{
 									Type: "socket", 
 									Count: 1,
 									With: slot_resource,
 									},
-								},
+								},*/
 							},
 						},
 					}

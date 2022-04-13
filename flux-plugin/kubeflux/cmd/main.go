@@ -89,6 +89,12 @@ func (s *server) Cancel(ctx context.Context, in *pb.CancelRequest) (*pb.CancelRe
 	dr := &pb.CancelResponse{JobID: in.JobID, Error: int32(err)}
 	fmt.Printf("[GRPCServer] Sending Cancel response %v\n", dr)
 
+	err = fluxcli.ReapiCliCancel(s.fctx, int64(in.JobID), true)
+	if err < 0 {
+		return nil, errors.New("Error in Cancel")
+	}
+
+	fmt.Printf("[GRPCServer] Sending Cancel response %v\n", dr)
 	return dr, nil
 }
 
@@ -105,6 +111,8 @@ func (s *server) Match(ctx context.Context, in *pb.MatchRequest) (*pb.MatchRespo
 
 	fmt.Printf("[GRPCServer] Received Match request %v\n", in)
 	reserved, allocated, at, overhead, jobid, fluxerr := fluxcli.ReapiCliMatchAllocate(s.fctx, false, string(spec))
+	printOutput(reserved, allocated, at, overhead, jobid, fluxerr)
+
 	fmt.Printf("Errors so far: %s\n", fluxcli.ReapiCliGetErrMsg(s.fctx))
 	if fluxerr != 0 {
 		return nil, errors.New("Error in ReapiCliMatchAllocate")
@@ -114,7 +122,7 @@ func (s *server) Match(ctx context.Context, in *pb.MatchRequest) (*pb.MatchRespo
 		return nil, nil
 	}
 
-	printOutput(reserved, allocated, at, overhead, jobid, fluxerr)
+	// printOutput(reserved, allocated, at, overhead, jobid, fluxerr)
 
 	nodetasks := utils.ParseAllocResult(allocated)
 	

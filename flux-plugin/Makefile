@@ -1,5 +1,5 @@
 COMMONENVVAR=GOOS=$(shell uname -s | tr A-Z a-z)
-BUILDENVVAR=CGO_CFLAGS="-I/root/flux-sched/resource/hlapi/bindings/c -I/root/flux-install/include" CGO_LDFLAGS="-L/root/flux-sched/resource/hlapi/bindings/c/.libs -lreapi_cli  -L/root/flux-sched/resource/.libs -lresource -lstdc++ -lczmq -ljansson -lhwloc -lboost_system -L/root/flux-install/lib -lflux-hostlist -lboost_graph -lyaml-cpp"
+BUILDENVVAR=CGO_CFLAGS="-I/root/flux-sched/resource/hlapi/bindings/c -I/root/flux-install/include" CGO_LDFLAGS="-L/root/flux-install/lib -lreapi_cli  -L/root/flux-install/lib -lresource -L/root/flux-install/lib -lflux-idset -lstdc++ -lczmq -ljansson -lhwloc -lboost_system -L/root/flux-install/lib -lflux-hostlist -lboost_graph -lyaml-cpp"
 
 LOCAL_REGISTRY=localhost:5000
 LOCAL_IMAGE=kubeflux-sidecar:latest

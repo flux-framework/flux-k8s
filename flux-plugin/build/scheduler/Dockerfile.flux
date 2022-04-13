@@ -66,6 +66,7 @@ RUN apt install -y python3-pip \
     libyaml-cpp-dev \ 
     python3-yaml \
     libedit-dev \
+    libarchive-dev \
     pkg-config && apt -y clean  && apt -y autoremove
 
 RUN cd /root/ && mkdir flux-install
@@ -124,7 +125,8 @@ RUN apt purge -y git  python3-dev \
 # RUN CGO_CFLAGS="-I/root/flux-sched/resource/hlapi/bindings/c -I/root/flux-install/include" CGO_LDFLAGS="-L/root/flux-install/lib/ -lreapi_cli  -L/root/flux-install/lib/ -lresource -lstdc++ -lczmq -ljansson -lhwloc -lboost_system -L/root/flux-install/lib -lflux-hostlist -lboost_graph -lyaml-cpp" go install -buildmode=shared -linkshared fluxcli
 
 WORKDIR /go/src 
-RUN cd fluxcli &&  go mod init fluxcli && go mod tidy &&  GOOS=linux CGO_CFLAGS="-I/root/flux-sched/resource/hlapi/bindings/c -I/root/flux-install/include" CGO_LDFLAGS="-L/root/flux-install/lib/ -lreapi_cli  -L/root/flux-install/lib/ -lresource -lstdc++ -lczmq -ljansson -lhwloc -lboost_system -L/root/flux-install/lib -lflux-hostlist -lboost_graph -lyaml-cpp" go install fluxcli 
+RUN cd fluxcli &&  go mod init fluxcli && go mod tidy 
+# &&  GOOS=linux CGO_CFLAGS="-I/root/flux-sched/resource/hlapi/bindings/c -I/root/flux-install/include" CGO_LDFLAGS="-L/root/flux-install/lib -lreapi_cli  -L/root/flux-install/lib -lresource -L/root/flux-install/lib -lflux-idset -lstdc++ -lczmq -ljansson -lhwloc -lboost_system -L/root/flux-install/lib -lflux-hostlist -lboost_graph -lyaml-cpp" go install fluxcli 
 
 RUN apt install -y protobuf-compiler curl && \
  go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.26 && \ 

@@ -124,15 +124,15 @@ func CreateJGF(filename string) error {
 			fluxgraph.MakeEdge(subnet, workernode, "contains") // this is rack otherwise
 			fluxgraph.MakeEdge(workernode, subnet, "in") // this is rack otherwise
 
-			socket := fluxgraph.MakeSocket(0, "socket")
-			fluxgraph.MakeEdge(workernode, socket, "contains")
-			fluxgraph.MakeEdge(socket, workernode, "in")
+			// socket := fluxgraph.MakeSocket(0, "socket")
+			// fluxgraph.MakeEdge(workernode, socket, "contains")
+			// fluxgraph.MakeEdge(socket, workernode, "in")
 
 			for index := 0; index < int(totalcpu); index++ {
 				// MakeCore(index int, name string)
 				core := fluxgraph.MakeCore(index, "core")
-				fluxgraph.MakeEdge(socket, core, "contains")
-				fluxgraph.MakeEdge(core, socket, "in")
+				fluxgraph.MakeEdge(workernode, core, "contains") // workernode was socket
+				fluxgraph.MakeEdge(core, workernode, "in")
 				if vcores == 0 {
 					fluxgraph.MakeNFDProperties(core, index, "cpu-", &node.Labels)
 				} else {
@@ -147,8 +147,8 @@ func CreateJGF(filename string) error {
 			fractionmem := totalmem >> 30
 			for i:=0; i < int(fractionmem); i++ {
 				mem := fluxgraph.MakeMemory(i, "memory", "B", 1<<30)
-				fluxgraph.MakeEdge(socket, mem, "contains")
-				fluxgraph.MakeEdge(mem, socket, "in")
+				fluxgraph.MakeEdge(workernode, mem, "contains")
+				fluxgraph.MakeEdge(mem, workernode, "in")
 			}
 			// mem := fluxgraph.MakeMemory(0, "memory", "KB", int(totalmem))
 			// fluxgraph.MakeEdge(socket, mem, "contains")
