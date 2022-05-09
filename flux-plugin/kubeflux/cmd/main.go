@@ -35,6 +35,7 @@ type server struct{
 func main () {
 	fmt.Println("This is the fluxion grpc server")
 	policy := flag.String("policy", "", "Match policy")
+
 	flag.Parse()
 	fctx := fluxcli.NewReapiCli()
 	fmt.Println("Created cli context ", fctx)
@@ -51,12 +52,13 @@ func main () {
 		return
 	}
 	
+	p := "{}"
 	if *policy != "" {
-		p :=string("{\"matcher_policy\": \"" + *policy + "\"}")
+		p = string("{\"matcher_policy\": \"" + *policy + "\"}")
 		fmt.Println("Match policy: ", p)
-	}
-
-	fluxcli.ReapiCliInit(fctx, string(jgf), "{}")
+	} 
+	
+	fluxcli.ReapiCliInit(fctx, string(jgf), p)
 
 
 	// lis, err := net.Listen("unix", SockAddr)
@@ -81,7 +83,7 @@ func main () {
 
 func (s *server) Cancel(ctx context.Context, in *pb.CancelRequest) (*pb.CancelResponse, error) {
 	fmt.Printf("[GRPCServer] Received Cancel request %v\n", in)
-	err := fluxcli.ReapiCliCancel(s.fctx, int64(in.JobID), false)
+	err := fluxcli.ReapiCliCancel(s.fctx, int64(in.JobID), true)
 	if err < 0 {
 		return nil, errors.New("Error in Cancel")
 	}
@@ -89,10 +91,13 @@ func (s *server) Cancel(ctx context.Context, in *pb.CancelRequest) (*pb.CancelRe
 	dr := &pb.CancelResponse{JobID: in.JobID, Error: int32(err)}
 	fmt.Printf("[GRPCServer] Sending Cancel response %v\n", dr)
 
-	err = fluxcli.ReapiCliCancel(s.fctx, int64(in.JobID), true)
-	if err < 0 {
-		return nil, errors.New("Error in Cancel")
-	}
+	fmt.Printf("[CancelRPC] Errors so far: %s\n", fluxcli.ReapiCliGetErrMsg(s.fctx))
+	
+	//func ReapiCliInfo(ctx *ReapiCtx, jobid int64) (reserved bool, at int64, overhead float64, mode string, err int)
+	reserved, at, overhead, mode, fluxerr := fluxcli.ReapiCliInfo(s.fctx, int64(in.JobID))
+
+	fmt.Println("\n\t----Job Info output---")
+	fmt.Printf("jobid: %d\nreserved: %s\nat: %t\noverhead: %d\nmode: %f\nerror: %d\n", in.JobID, reserved, at, overhead, mode, fluxerr)
 
 	fmt.Printf("[GRPCServer] Sending Cancel response %v\n", dr)
 	return dr, nil
@@ -113,7 +118,7 @@ func (s *server) Match(ctx context.Context, in *pb.MatchRequest) (*pb.MatchRespo
 	reserved, allocated, at, overhead, jobid, fluxerr := fluxcli.ReapiCliMatchAllocate(s.fctx, false, string(spec))
 	printOutput(reserved, allocated, at, overhead, jobid, fluxerr)
 
-	fmt.Printf("Errors so far: %s\n", fluxcli.ReapiCliGetErrMsg(s.fctx))
+	fmt.Printf("[MatchRPC] Errors so far: %s\n", fluxcli.ReapiCliGetErrMsg(s.fctx))
 	if fluxerr != 0 {
 		return nil, errors.New("Error in ReapiCliMatchAllocate")
 	}
