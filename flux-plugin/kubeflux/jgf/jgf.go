@@ -142,7 +142,7 @@ func (g *Fluxjgf) MakeNode(index int, exclusive bool, subnet string) string {
 			Type:      "node",
 			Basename:  subnet,
 			Name:      subnet + strconv.Itoa(g.Elements),
-			Id:        index,
+			Id:        g.Elements,
 			Uniq_id:   g.Elements,
 			Rank:      -1,
 			Exclusive: exclusive,
@@ -283,7 +283,7 @@ func (g *Fluxjgf) MakeGPU(index int, name string, size int) string {
 	newnode := node{
 		Id: strconv.Itoa(g.Elements),
 		Metadata: nodeMetadata{
-			Type:      "GPU",
+			Type:      "gpu",
 			Basename:  name,
 			Name:      name + strconv.Itoa(index),
 			Id:        index,
