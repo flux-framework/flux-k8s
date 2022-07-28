@@ -68,12 +68,12 @@ RUN apt install -y python3-pip \
     libedit-dev \
     libarchive-dev \
     pkg-config && apt -y clean  && apt -y autoremove
-
+RUN python --version
 RUN cd /root/ && mkdir flux-install
 WORKDIR /root/
 RUN git clone https://github.com/flux-framework/flux-core.git 
 
-RUN cd /root/flux-core/ && ./autogen.sh && PYTHON_VERSION=3.8 ./configure --prefix=/root/flux-install \ 
+RUN cd /root/flux-core/ && ./autogen.sh && PYTHON_VERSION=3 ./configure --prefix=/root/flux-install \ 
     && make -j && make install && cd /root && rm -rf /root/flux-core
 
 # Install go 16

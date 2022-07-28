@@ -71,24 +71,7 @@ func CreateJGF(filename string) error {
 			sdnCount = sdnCount+1
 			fluxgraph.MakeEdge(cluster, subnet, "contains")
 			fluxgraph.MakeEdge(subnet, cluster, "in")
-			/*
-			fmt.Println("Node Addresses ", node.Status.Addresses)
-			lastBin := strings.LastIndex( node.Status.Addresses[0].Address, "." )
-
-			fmt.Println("Last bin ", lastBin)
-			subnetName := node.Status.Addresses[0].Address[0:lastBin]
-			fmt.Printf("Subnet is: %v\n", subnetName)
-
-			if _, ok := subnets[subnetName]; !ok {
-				fmt.Println("New subnet ", subnetName)
-				subnet := fluxgraph.MakeSubnet(sdnCount, subnetName)
-				sdnCount = sdnCount+1
-				subnets[subnetName] = subnet
-				fluxgraph.MakeEdge(cluster, subnet, "contains")
-				fluxgraph.MakeEdge(subnet, cluster, "in")
-			}
-			subnet := subnets[subnetName]
-			*/
+	
 		
 			reqs := computeTotalRequests(pods)
 			cpuReqs := reqs[corev1.ResourceCPU]
@@ -106,7 +89,9 @@ func CreateJGF(filename string) error {
 			fmt.Println("Node ", node.GetName(), " flux cpu ", totalcpu)
 			totalAllocCpu = totalAllocCpu+totalcpu
 			totalmem := node.Status.Allocatable.Memory().Value()
-			// fmt.Println("Node ", node.GetName(), " totalmem ", totalmem)
+			gpuAllocatable, hasGpuAllocatable := node.Status.Allocatable["nvidia.com/gpu"]
+
+			
 			// reslist := node.Status.Allocatable
 			// resources := make([]corev1.ResourceName, 0, len(reslist))
 			// for resource := range reslist {
@@ -127,6 +112,17 @@ func CreateJGF(filename string) error {
 			// socket := fluxgraph.MakeSocket(0, "socket")
 			// fluxgraph.MakeEdge(workernode, socket, "contains")
 			// fluxgraph.MakeEdge(socket, workernode, "in")
+			
+			if hasGpuAllocatable {
+				fmt.Println("GPU Resource quantity ", gpuAllocatable.Value())
+				//MakeGPU(index int, name string, size int) string {
+				for index :=0; index < int(gpuAllocatable.Value()); index++ {
+					gpu := fluxgraph.MakeGPU(index, "nvidiagpu", 1)
+					fluxgraph.MakeEdge(workernode, gpu, "contains") // workernode was socket
+					fluxgraph.MakeEdge(gpu, workernode, "in")
+				}
+				
+			}
 
 			for index := 0; index < int(totalcpu); index++ {
 				// MakeCore(index int, name string)

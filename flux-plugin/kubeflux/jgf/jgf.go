@@ -283,7 +283,7 @@ func (g *Fluxjgf) MakeGPU(index int, name string, size int) string {
 	newnode := node{
 		Id: strconv.Itoa(g.Elements),
 		Metadata: nodeMetadata{
-			Type:      "GPU",
+			Type:      "gpu",
 			Basename:  name,
 			Name:      name + strconv.Itoa(index),
 			Id:        index,

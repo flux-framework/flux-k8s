@@ -97,7 +97,7 @@ func (s *server) Cancel(ctx context.Context, in *pb.CancelRequest) (*pb.CancelRe
 	reserved, at, overhead, mode, fluxerr := fluxcli.ReapiCliInfo(s.fctx, int64(in.JobID))
 
 	fmt.Println("\n\t----Job Info output---")
-	fmt.Printf("jobid: %d\nreserved: %s\nat: %t\noverhead: %d\nmode: %f\nerror: %d\n", in.JobID, reserved, at, overhead, mode, fluxerr)
+	fmt.Printf("jobid: %d\nreserved: %t\nat: %d\noverhead: %f\nmode: %s\nerror: %d\n", in.JobID, reserved, at, overhead, mode, fluxerr)
 
 	fmt.Printf("[GRPCServer] Sending Cancel response %v\n", dr)
 	return dr, nil
