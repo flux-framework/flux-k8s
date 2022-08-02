@@ -69,12 +69,12 @@ RUN apt install -y python3-pip \
     libarchive-dev \
     pkg-config && apt -y clean  && apt -y autoremove
 RUN python --version
-RUN cd /root/ && mkdir flux-install
-WORKDIR /root/
+RUN cd /home/ && mkdir flux-install
+WORKDIR /home/
 RUN git clone https://github.com/flux-framework/flux-core.git 
 
-RUN cd /root/flux-core/ && ./autogen.sh && PYTHON_VERSION=3 ./configure --prefix=/root/flux-install \ 
-    && make -j && make install && cd /root && rm -rf /root/flux-core
+RUN cd /home/flux-core/ && ./autogen.sh && PYTHON_VERSION=3 ./configure --prefix=/home/flux-install \ 
+    && make -j && make install && cd /home && rm -rf /home/flux-core
 
 # Install go 16
 WORKDIR /home
@@ -86,20 +86,19 @@ ENV GOPATH "/go"
 ENV PATH "$GOROOT/bin:$PATH"
 RUN mkdir -p /go/src
 
-WORKDIR /root/
-ENV PATH "/root/flux-install/bin:$PATH"
-ENV LD_LIBRARY_PATH "/root/flux-install/lib/flux:/root/flux-install/lib"
+ENV PATH "/home/flux-install/bin:$PATH"
+ENV LD_LIBRARY_PATH "/home/flux-install/lib/flux:/home/flux-install/lib"
 RUN flux keygen
 
 RUN  git clone https://github.com/cmisale/flux-sched.git --branch api-kubeflux --single-branch && \ 
-    cd /root/flux-sched/ \
-	&& ./autogen.sh && PYTHON_VERSION=3.8 ./configure --prefix=/root/flux-install && make -j && make install \
+    cd /home/flux-sched/ \
+	&& ./autogen.sh && PYTHON_VERSION=3.8 ./configure --prefix=/home/flux-install && make -j && make install \
 	&& cp t/data/resource/jgfs/tiny.json /home \
     && cp t/data/resource/jobspecs/basics/test001.yaml /home \
-	&& cp -r resource/hlapi/bindings/c/.libs/* resource/.libs/* /root/flux-install/lib/ \
+	&& cp -r resource/hlapi/bindings/c/.libs/* resource/.libs/* /home/flux-install/lib/ \
 	&& cp -r resource/hlapi/bindings/go/src/fluxcli /go/src/ \
 	&& mv  resource/hlapi/bindings /tmp \
-	&& cd /root && rm -rf flux-sched && mkdir -p flux-sched/resource/hlapi && mv /tmp/bindings flux-sched/resource/hlapi
+	&& cd /home && rm -rf flux-sched && mkdir -p flux-sched/resource/hlapi && mv /tmp/bindings flux-sched/resource/hlapi
 
 RUN apt purge -y git  python3-dev \
     python3-cffi \
@@ -146,6 +145,7 @@ WORKDIR /go/src/kubeflux/
 RUN go mod tidy
 RUN make server
 RUN mkdir -p /home/data/jobspecs && mkdir -p /home/data/jgf
+RUN chmod -R ugo+rwx /home/data
 # COPY examples/data/kubecluster.json /home/data/jgf/kubecluster.json
 # BELOW IS NEEDED ONLY TO BUILD THE SCHEDULER PLUGIN
 
