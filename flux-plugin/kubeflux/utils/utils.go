@@ -51,8 +51,8 @@ func CreateJGF(filename string) error {
 	for node_index, node := range nodes.Items {
 		_, worker := node.Labels["node-role.kubernetes.io/worker"]
 		_, fluxnode := node.Labels["kubeflux"]
-
-		if worker || fluxnode {
+		fmt.Println("node labels ", worker, " ", fluxnode)
+		if !node.Spec.Unschedulable {
 			fieldselector, err := fields.ParseSelector("spec.nodeName=" + node.GetName() + ",status.phase!=" + string(corev1.PodSucceeded) + ",status.phase!=" + string(corev1.PodFailed))
 			if err != nil {
 				return err
@@ -85,7 +85,7 @@ func CreateJGF(filename string) error {
 			avail := node.Status.Allocatable.Cpu().MilliValue()
 			// fmt.Println("Node ", node.GetName(), " avail cpu ", avail, "/", node.Status.Allocatable.Cpu().MilliValue())
 			// fmt.Println("Node ", node.GetName(), " occupied cpu ", fractionCpuReqs)
-			totalcpu := int64((avail-cpuReqs.MilliValue())/1000) - 1
+			totalcpu := int64((avail-cpuReqs.MilliValue())/1000) //- 1
 			fmt.Println("Node ", node.GetName(), " flux cpu ", totalcpu)
 			totalAllocCpu = totalAllocCpu+totalcpu
 			totalmem := node.Status.Allocatable.Memory().Value()
