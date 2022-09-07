@@ -254,7 +254,34 @@ func (g *Fluxjgf) MakeNFDProperties(coreid string, index int, filter string, lab
 			g.MakeEdge(coreid, newnode.Id, "contains")
 		}
 	}
+}
 
+func (g *Fluxjgf) MakeNFDPropertiesByValue(coreid string, index int, filter string, labels *map[string]string) {
+	for key, val := range *labels {
+		if strings.Contains(key, filter) {
+			name := val
+
+			newnode := node{
+				Id: strconv.Itoa(g.Elements),
+				Metadata: nodeMetadata{
+					Type:      name,
+					Basename:  name,
+					Name:      name + strconv.Itoa(index),
+					Id:        index,
+					Uniq_id:   g.Elements,
+					Rank:      -1,
+					Exclusive: false,
+					Unit:      "",
+					Size:      1,
+					Paths: map[string]string{
+						"containment": "",
+					},
+				},
+			}
+			g.addNode(newnode)
+			g.MakeEdge(coreid, newnode.Id, "contains")
+		}
+	}
 }
 
 func (g *Fluxjgf) MakeMemory(index int, name string, unit string, size int) string {
