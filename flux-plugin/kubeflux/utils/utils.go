@@ -45,13 +45,13 @@ func CreateJGF(filename string) error {
 
 	vcores := 0
 	fmt.Println("Number nodes ", len(nodes.Items))
-	var totalAllocCpu int64
+	var totalAllocCpu, totalmem int64
 	totalAllocCpu = 0
 	sdnCount := 0
 	for node_index, node := range nodes.Items {
-		_, worker := node.Labels["node-role.kubernetes.io/worker"]
-		_, fluxnode := node.Labels["kubeflux"]
-		fmt.Println("node labels ", worker, " ", fluxnode)
+		// _, worker := node.Labels["node-role.kubernetes.io/worker"]
+		// _, fluxnode := node.Labels["kubeflux"]
+		// fmt.Println("node labels ", worker, " ", fluxnode)
 		if !node.Spec.Unschedulable {
 			fieldselector, err := fields.ParseSelector("spec.nodeName=" + node.GetName() + ",status.phase!=" + string(corev1.PodSucceeded) + ",status.phase!=" + string(corev1.PodFailed))
 			if err != nil {
@@ -75,20 +75,15 @@ func CreateJGF(filename string) error {
 		
 			reqs := computeTotalRequests(pods)
 			cpuReqs := reqs[corev1.ResourceCPU]
-			// memReqs := reqs[corev1.ResourceMemory]
-			// fmt.Println("Node ", node.GetName(), " memReqs ", memReqs.String())
-			// fractionCpuReqs := float64(0)
-			// if node.Status.Allocatable.Cpu().MilliValue() != 0 {
-			// 	fractionCpuReqs = float64(cpuReqs.MilliValue()) / float64(node.Status.Allocatable.Cpu().MilliValue()) * 100
-			// }
-			// fmt.Println("Node ", node.GetName(), " cpuReqs ", cpuReqs.MilliValue())
+			memReqs := reqs[corev1.ResourceMemory]
+			
+			fmt.Println("Node ", node.GetName(), " memReqs ", memReqs.String())
 			avail := node.Status.Allocatable.Cpu().MilliValue()
-			// fmt.Println("Node ", node.GetName(), " avail cpu ", avail, "/", node.Status.Allocatable.Cpu().MilliValue())
-			// fmt.Println("Node ", node.GetName(), " occupied cpu ", fractionCpuReqs)
 			totalcpu := int64((avail-cpuReqs.MilliValue())/1000) //- 1
 			fmt.Println("Node ", node.GetName(), " flux cpu ", totalcpu)
 			totalAllocCpu = totalAllocCpu+totalcpu
-			totalmem := node.Status.Allocatable.Memory().Value()
+			totalmem = node.Status.Allocatable.Memory().Value() - memReqs.Value()
+			fmt.Println("Node ", node.GetName(), " total mem ", totalmem)
 			gpuAllocatable, hasGpuAllocatable := node.Status.Allocatable["nvidia.com/gpu"]
 
 			
@@ -131,6 +126,7 @@ func CreateJGF(filename string) error {
 				fluxgraph.MakeEdge(core, workernode, "in")
 				if vcores == 0 {
 					fluxgraph.MakeNFDProperties(core, index, "cpu-", &node.Labels)
+					// fluxgraph.MakeNFDProperties(core, index, "netmark-", &node.Labels)
 				} else {
 					for vc := 0; vc < vcores; vc++ {
 						vcore := fluxgraph.MakeVCore(core, vc, "vcore")
@@ -139,16 +135,15 @@ func CreateJGF(filename string) error {
 				}
 			}
 
-			//  MakeMemory(index int, name string, unit string, size int
+			// MakeMemory(index int, name string, unit string, size int)
 			fractionmem := totalmem >> 30
-			for i:=0; i < int(fractionmem); i++ {
-				mem := fluxgraph.MakeMemory(i, "memory", "B", 1<<30)
+			// fractionmem := (totalmem/totalcpu) >> 20
+			// fmt.Println("Creating ", fractionmem, " vertices with ", 1<<10, " MB of mem")
+			for i:=0; i < /*int(totalcpu)*/int(fractionmem); i++ {
+				mem := fluxgraph.MakeMemory(i, "memory", "MB", int(1<<10))
 				fluxgraph.MakeEdge(workernode, mem, "contains")
 				fluxgraph.MakeEdge(mem, workernode, "in")
 			}
-			// mem := fluxgraph.MakeMemory(0, "memory", "KB", int(totalmem))
-			// fluxgraph.MakeEdge(socket, mem, "contains")
-			// fluxgraph.MakeEdge(mem, socket, "in")
 		}
 	}
 	fmt.Println("Can request at most ", totalAllocCpu, " exclusive cpu")

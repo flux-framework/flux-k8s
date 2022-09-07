@@ -43,7 +43,8 @@ func CreateJobSpecYaml(pr *pb.PodSpec, count int32, filename string) error {
 		command := []string{pr.Container}
 		socket_resources[0] = Resource{Type: "core", Count: int64(pr.Cpu)}
 		if pr.Memory > 0 {
-			socket_resources = append(socket_resources, Resource{Type: "memory", Count: pr.Memory})
+			toMB := pr.Memory >> 20
+			socket_resources = append(socket_resources, Resource{Type: "memory", Count: toMB})
 		}
 
 		if pr.Gpu > 0 {
@@ -83,7 +84,7 @@ func CreateJobSpecYaml(pr *pb.PodSpec, count int32, filename string) error {
 
 		if len(pr.Labels) > 0 {
 			for _, label := range pr.Labels {
-				if label == "subnet" {
+				if label == "zone" {
 					node_resource := make([]Resource, 1)
 					node_resource[0] = Resource{
 						Type: "subnet", 
