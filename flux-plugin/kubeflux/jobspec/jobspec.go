@@ -20,8 +20,8 @@ import (
 	"log"
 	"math"
 	"os"
-	pb "kubeflux/fluxcli-grpc"
 
+	"kubeflux/utils"
 	"gopkg.in/yaml.v2"
 )
 
@@ -38,7 +38,7 @@ Ps: &pb.PodSpec{
 		},
 */
 
-func CreateJobSpecYaml(pr *pb.PodSpec, count int32, filename string) error {
+func CreateJobSpecYaml(pr *utils.PodSpec, count int32, filename string) error {
 		socket_resources := make([]Resource, 1)
 		command := []string{pr.Container}
 		socket_resources[0] = Resource{Type: "core", Count: int64(pr.Cpu)}

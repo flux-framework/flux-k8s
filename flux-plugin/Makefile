@@ -10,7 +10,7 @@ all: fluxcli
 
 .PHONY: fluxcli
 fluxcli: 
-	docker build -f build/scheduler/Dockerfile.flux --build-arg ARCH="amd64" --build-arg RELEASE_VERSION="$(RELEASE_VERSION)" -t $(LOCAL_REGISTRY)/$(LOCAL_IMAGE) .
+	docker build -f build/scheduler/Dockerfile --build-arg ARCH="amd64" --build-arg RELEASE_VERSION="$(RELEASE_VERSION)" -t $(LOCAL_REGISTRY)/$(LOCAL_IMAGE) .
 
 
 .PHONY: server

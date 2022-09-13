@@ -1,4 +1,4 @@
-module kubeflux
+module github.com/flux-framework/flux-k8s/flux-plugin/kubeflux
 
 go 1.16
 
