@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"flag"
-	"kubeflux/fluxion"
+	"github.com/flux-framework/flux-k8s/flux-plugin/kubeflux/fluxion"
 )
 
 func main () {
