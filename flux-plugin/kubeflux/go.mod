@@ -10,7 +10,7 @@ require (
 	k8s.io/apimachinery v0.22.3
 	k8s.io/client-go v0.22.3
 	k8s.io/kubernetes v1.22.3
-	github.com/flux-framework/flux-k8s/flux-plugin/kubeflux v0.0.0-20220913155810-9ff731f91061
+	github.com/cmisale/flux-sched/resource/hlapi/bindings/go/src/fluxcli v0.0.0-20220914032230-ec90a6deb361
 )
 
 replace (
