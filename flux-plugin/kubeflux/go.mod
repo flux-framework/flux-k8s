@@ -3,14 +3,14 @@ module github.com/flux-framework/flux-k8s/flux-plugin/kubeflux
 go 1.19
 
 require (
-	google.golang.org/genproto v0.0.0-20210602131652-f16073e35f0c // indirect
+	github.com/cmisale/flux-sched/resource/hlapi/bindings/go/src/fluxcli v0.0.0-20220914032230-ec90a6deb361
 	google.golang.org/grpc v1.38.0
+	google.golang.org/protobuf v1.26.0
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.22.3
 	k8s.io/apimachinery v0.22.3
 	k8s.io/client-go v0.22.3
-	k8s.io/kubernetes v1.22.3
-	github.com/cmisale/flux-sched/resource/hlapi/bindings/go/src/fluxcli v0.0.0-20220914032230-ec90a6deb361
+	k8s.io/kubectl v0.0.0
 )
 
 replace (
