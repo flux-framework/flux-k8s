@@ -1,6 +1,6 @@
 module github.com/flux-framework/flux-k8s/flux-plugin/kubeflux
 
-go 1.16
+go 1.19
 
 require (
 	google.golang.org/genproto v0.0.0-20210602131652-f16073e35f0c // indirect
