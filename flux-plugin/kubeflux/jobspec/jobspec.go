@@ -21,7 +21,7 @@ import (
 	"math"
 	"os"
 
-	"kubeflux/utils"
+	"github.com/flux-framework/flux-k8s/flux-plugin/kubeflux/utils"
 	"gopkg.in/yaml.v2"
 )
 

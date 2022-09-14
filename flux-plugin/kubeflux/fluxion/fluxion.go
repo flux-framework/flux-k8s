@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"github.com/cmisale/flux-sched/resource/hlapi/bindings/go/src/fluxcli"
-	"kubeflux/utils" 
-	"kubeflux/jobspec"
+	"github.com/flux-framework/flux-k8s/flux-plugin/kubeflux/utils" 
+	"github.com/flux-framework/flux-k8s/flux-plugin/kubeflux/jobspec"
 	"errors"
 )
 
