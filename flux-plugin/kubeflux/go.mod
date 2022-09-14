@@ -10,11 +10,11 @@ require (
 	k8s.io/apimachinery v0.22.3
 	k8s.io/client-go v0.22.3
 	k8s.io/kubernetes v1.22.3
-	fluxcli v0.0.0
+	github.com/cmisale/flux-sched/resource/hlapi/bindings/go/src/fluxcli gobind-dev
 )
 
 replace (
-	fluxcli => /go/src/fluxcli
+	<!-- fluxcli => /go/src/fluxcli -->
 	k8s.io/api => k8s.io/api v0.22.3
 	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.22.3
 	k8s.io/apimachinery => k8s.io/apimachinery v0.22.3
