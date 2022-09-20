@@ -1,28 +1,34 @@
 package fluxion
 
 import (
-	"fmt"
-	"io/ioutil"
+	
 	"github.com/cmisale/flux-sched/resource/hlapi/bindings/go/src/fluxcli"
 	"github.com/flux-framework/flux-k8s/flux-plugin/kubeflux/utils" 
 	"github.com/flux-framework/flux-k8s/flux-plugin/kubeflux/jobspec"
+	pb "github.com/flux-framework/flux-k8s/flux-plugin/kubeflux/fluxcli-grpc"
+
+	"context"
 	"errors"
+	"fmt"
+	"io/ioutil"
 )
 
 type Fluxion struct {
 	fctx 		*fluxcli.ReapiCtx
-	Policy 		string
+	pb.UnimplementedFluxcliServiceServer
 }
 
-func (f *Fluxion) InitFluxion() {
+func (f *Fluxion) Context() *fluxcli.ReapiCtx {
+	return f.fctx
+}
+
+func (f *Fluxion) InitFluxion(policy *string, label *string) {
 	f.fctx = fluxcli.NewReapiCli()
 
-
-	f.fctx = fluxcli.NewReapiCli()
 	fmt.Println("Created cli context ", f.fctx)
 	fmt.Printf("%+v\n", f.fctx)
-	filename := "/kubecluster.json"
-	err := utils.CreateJGF(filename)
+	filename := "/home/data/jgf/kubecluster.json"
+	err := utils.CreateJGF(filename, label)
 	if err != nil {
 		return
 	}
@@ -34,8 +40,8 @@ func (f *Fluxion) InitFluxion() {
 	}
 	
 	p := "{}"
-	if f.Policy != "" {
-		p = string("{\"matcher_policy\": \"" + f.Policy + "\"}")
+	if *policy != "" {
+		p = string("{\"matcher_policy\": \"" + *policy + "\"}")
 		fmt.Println("Match policy: ", p)
 	} 
 	
@@ -43,20 +49,19 @@ func (f *Fluxion) InitFluxion() {
 
 }
 
-func (f *Fluxion) Cancel(in *utils.CancelRequest) (*utils.CancelResponse, error) {
+func (s *Fluxion) Cancel(ctx context.Context, in *pb.CancelRequest) (*pb.CancelResponse, error) {
 	fmt.Printf("[GRPCServer] Received Cancel request %v\n", in)
-	err := fluxcli.ReapiCliCancel(f.fctx, int64(in.JobID), true)
+	err := fluxcli.ReapiCliCancel(s.fctx, int64(in.JobID), true)
 	if err < 0 {
 		return nil, errors.New("Error in Cancel")
 	}
 
-	dr := &utils.CancelResponse{JobID: in.JobID, Error: int32(err)}
+	dr := &pb.CancelResponse{JobID: in.JobID, Error: int32(err)}
 	fmt.Printf("[GRPCServer] Sending Cancel response %v\n", dr)
 
-	fmt.Printf("[CancelRPC] Errors so far: %s\n", fluxcli.ReapiCliGetErrMsg(f.fctx))
-	
-	//func ReapiCliInfo(ctx *ReapiCtx, jobid int64) (reserved bool, at int64, overhead float64, mode string, err int)
-	reserved, at, overhead, mode, fluxerr := fluxcli.ReapiCliInfo(f.fctx, int64(in.JobID))
+	fmt.Printf("[CancelRPC] Errors so far: %s\n", fluxcli.ReapiCliGetErrMsg(s.fctx))
+
+	reserved, at, overhead, mode, fluxerr := fluxcli.ReapiCliInfo(s.fctx, int64(in.JobID))
 
 	fmt.Println("\n\t----Job Info output---")
 	fmt.Printf("jobid: %d\nreserved: %t\nat: %d\noverhead: %f\nmode: %s\nerror: %d\n", in.JobID, reserved, at, overhead, mode, fluxerr)
@@ -65,11 +70,9 @@ func (f *Fluxion) Cancel(in *utils.CancelRequest) (*utils.CancelResponse, error)
 	return dr, nil
 }
 
-func (f *Fluxion) Match(in *utils.MatchRequest) (*utils.MatchResponse, error) {
-	// currenttime := time.Now()
-	// filename := fmt.Sprintf("/home/data/jobspecs/jobspec-%s-%s.yaml", currenttime.Format(time.RFC3339Nano), in.Ps.Id)
-	filename := "/jobspec.yaml"
-	jobspec.CreateJobSpecYaml(&in.Ps, in.Count, filename)
+func (s *Fluxion) Match(ctx context.Context, in *pb.MatchRequest) (*pb.MatchResponse, error) {
+	filename := "/home/data/jobspecs/jobspec.yaml"
+	jobspec.CreateJobSpecYaml(in.Ps, in.Count, filename)
 
 	spec, err := ioutil.ReadFile(filename)
 	if err != nil {
@@ -77,10 +80,10 @@ func (f *Fluxion) Match(in *utils.MatchRequest) (*utils.MatchResponse, error) {
 	}
 
 	fmt.Printf("[GRPCServer] Received Match request %v\n", in)
-	reserved, allocated, at, overhead, jobid, fluxerr := fluxcli.ReapiCliMatchAllocate(f.fctx, false, string(spec))
-	printOutput(reserved, allocated, at, overhead, jobid, fluxerr)
+	reserved, allocated, at, overhead, jobid, fluxerr := fluxcli.ReapiCliMatchAllocate(s.fctx, false, string(spec))
+	utils.PrintOutput(reserved, allocated, at, overhead, jobid, fluxerr)
 
-	fmt.Printf("[MatchRPC] Errors so far: %s\n", fluxcli.ReapiCliGetErrMsg(f.fctx))
+	fmt.Printf("[MatchRPC] Errors so far: %s\n", fluxcli.ReapiCliGetErrMsg(s.fctx))
 	if fluxerr != 0 {
 		return nil, errors.New("Error in ReapiCliMatchAllocate")
 	}
@@ -89,24 +92,16 @@ func (f *Fluxion) Match(in *utils.MatchRequest) (*utils.MatchResponse, error) {
 		return nil, nil
 	}
 
-	// printOutput(reserved, allocated, at, overhead, jobid, fluxerr)
-
 	nodetasks := utils.ParseAllocResult(allocated)
 	
-	nodetaskslist := make([]*utils.NodeAlloc, len(nodetasks))
+	nodetaskslist := make([]*pb.NodeAlloc, len(nodetasks))
 	for i, result := range nodetasks {
-		nodetaskslist[i] = &utils.NodeAlloc {
+		nodetaskslist[i] = &pb.NodeAlloc {
 			NodeID: result.Basename,
 			Tasks: int32(result.CoreCount)/in.Ps.Cpu,
 		}
 	}
-	mr := &utils.MatchResponse{PodID: in.Ps.Id, Nodelist: nodetaskslist, JobID: int64(jobid)}
+	mr := &pb.MatchResponse{PodID: in.Ps.Id, Nodelist: nodetaskslist, JobID: int64(jobid)}
 	fmt.Printf("[GRPCServer] Response %v \n", mr)
 	return mr, nil
-}
-
-////// Utility functions
-func printOutput(reserved bool, allocated string, at int64, overhead float64, jobid uint64, fluxerr int) {
-	fmt.Println("\n\t----Match Allocate output---")
-	fmt.Printf("jobid: %d\nreserved: %t\nallocated: %s\nat: %d\noverhead: %f\nerror: %d\n", jobid, reserved, allocated, at, overhead, fluxerr)
 }

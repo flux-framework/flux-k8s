@@ -16,7 +16,7 @@ import (
 )
 
 
-func CreateJGF(filename string) error {
+func CreateJGF(filename string, label *string) error {
 	ctx := context.Background()
 	config, err := rest.InClusterConfig()
 	if err != nil {
@@ -50,8 +50,15 @@ func CreateJGF(filename string) error {
 	sdnCount := 0
 	for node_index, node := range nodes.Items {
 		// _, worker := node.Labels["node-role.kubernetes.io/worker"]
-		// _, fluxnode := node.Labels["kubeflux"]
-		// fmt.Println("node labels ", worker, " ", fluxnode)
+		if *label != "" {
+			_, fluxnode := node.Labels[*label]
+			if !fluxnode {
+				fmt.Println("Skipping node ",  node.GetName())
+				continue
+			}
+		} 
+			
+		fmt.Println("node in flux group ", node.GetName())
 		if !node.Spec.Unschedulable {
 			fieldselector, err := fields.ParseSelector("spec.nodeName=" + node.GetName() + ",status.phase!=" + string(corev1.PodSucceeded) + ",status.phase!=" + string(corev1.PodFailed))
 			if err != nil {
@@ -77,7 +84,6 @@ func CreateJGF(filename string) error {
 			cpuReqs := reqs[corev1.ResourceCPU]
 			memReqs := reqs[corev1.ResourceMemory]
 			
-			fmt.Println("Node ", node.GetName(), " memReqs ", memReqs.String())
 			avail := node.Status.Allocatable.Cpu().MilliValue()
 			totalcpu := int64((avail-cpuReqs.MilliValue())/1000) //- 1
 			fmt.Println("Node ", node.GetName(), " flux cpu ", totalcpu)
@@ -227,4 +233,10 @@ func ParseAllocResult(allocated string) []allocation{
 	}
 	fmt.Println("FINAL NODE RESULT:\n", result)
 	return result
+}
+
+////// Utility functions
+func PrintOutput(reserved bool, allocated string, at int64, overhead float64, jobid uint64, fluxerr int) {
+	fmt.Println("\n\t----Match Allocate output---")
+	fmt.Printf("jobid: %d\nreserved: %t\nallocated: %s\nat: %d\noverhead: %f\nerror: %d\n", jobid, reserved, allocated, at, overhead, fluxerr)
 }
