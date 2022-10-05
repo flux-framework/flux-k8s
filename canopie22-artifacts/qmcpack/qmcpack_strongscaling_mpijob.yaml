@@ -1,0 +1,58 @@
+apiVersion: kubeflow.org/v2beta1
+kind: MPIJob
+metadata:
+  name: qmcpack
+spec:
+  slotsPerWorker: 1
+  runPolicy:
+    cleanPodPolicy: Running
+    ttlSecondsAfterFinished: 60
+  sshAuthMountPath: /root/.ssh
+  mpiReplicaSpecs:
+    Launcher:
+      replicas: 1
+      template:
+        spec:
+          containers:
+          - image: asarkarparsys/llnl:qmcpack_nio_fast
+            name: mpi-launcher
+            env:
+            - name: PATH
+              value: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/openmpi/bin"
+            - name: LD_LIBRARY_PATH
+              value: "/opt/openmpi/lib"
+            command:
+            - bash
+            - -cx
+            - "mpirun --allow-run-as-root --mca orte_launch_agent /opt/openmpi/bin/orted -x PATH -x LD_LIBRARY_PATH -n 4 --bind-to none --oversubscribe --map-by socket --hostfile /etc/mpi/hostfile /root/qmcpack/qmcpack NiO-fcc-S8-dmc-strongscale.xml"
+            resources:
+              limits:
+                cpu: 1
+                memory: 1Gi
+          tolerations:
+          - key: "launcher"
+            operator: "Exists"
+            effect: "NoSchedule"
+    Worker:
+      replicas: 4
+      template:
+        spec:
+          #schedulerName: fluence
+          containers:
+          - image: asarkarparsys/llnl:qmcpack_nio_fast
+            name: mpi-worker
+            lifecycle:
+              postStart:
+                exec:
+                  command:
+                  - bash
+                  - -c
+                  - "while ! bash -c \"</dev/tcp/localhost/22\" >/dev/null 2>&1; do sleep 0.1; done"
+            command:
+            - /usr/sbin/sshd
+            args:
+            - -De
+            resources:
+              limits:
+                cpu: 2
+                memory: 2Gi

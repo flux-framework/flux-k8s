@@ -1,0 +1,37 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: scaling-study-efa
+  region: us-east-2
+  version: "1.21"
+
+availabilityZones: ["us-east-2a", "us-east-2b"]
+managedNodeGroups:
+  - name: launcher
+    availabilityZones: ["us-east-2b"]
+    instanceType: hpc6a.48xlarge
+    minSize: 2
+    maxSize: 2
+    efaEnabled: true
+    placement:
+      groupName: eks-efa-testing
+    taints:
+      - key: "launcher"
+        value: "true"
+        effect: NoSchedule
+    ssh:
+      allow: true
+      publicKeyPath: ~/.ssh/id_eks.pub
+  - name: workers
+    availabilityZones: ["us-east-2b"]
+    instanceType: hpc6a.48xlarge
+    minSize: 32
+    maxSize: 32
+    efaEnabled: true
+    placement:
+      groupName: eks-efa-testing
+    labels: { "fluence": "true" }
+    ssh:
+      allow: true
+      publicKeyPath: ~/.ssh/id_eks.pub

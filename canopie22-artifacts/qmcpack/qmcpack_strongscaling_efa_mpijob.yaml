@@ -1,0 +1,82 @@
+apiVersion: scheduling.sigs.k8s.io/v1alpha1
+kind: PodGroup
+metadata:
+  name: qmcpack
+spec:
+  scheduleTimeoutSeconds: 600
+  minMember: 1
+---
+apiVersion: kubeflow.org/v2beta1
+kind: MPIJob
+metadata:
+  name: qmcpack
+spec:
+  slotsPerWorker: 1
+  runPolicy:
+    cleanPodPolicy: Running
+    ttlSecondsAfterFinished: 60
+  sshAuthMountPath: /root/.ssh
+  mpiReplicaSpecs:
+    Launcher:
+      replicas: 1
+      template:
+        spec:
+          containers:
+          - image: asarkarparsys/llnl:qmcpack_efa_1504
+            imagePullPolicy: Always
+            name: mpi-launcher
+            command:
+            - bash
+            - -cx
+            - ". /etc/profile && time -p mpirun --allow-run-as-root --mca orte_launch_agent /opt/view/bin/orted --mca plm_rsh_agent rsh -x PATH -x LD_LIBRARY_PATH  -x FI_EFA_USE_DEVICE_RDMA=1 -x RDMAV_FORK_SAFE=1 -np %PROCS% --map-by numa --rank-by core --bind-to none /root/qmcpack/qmcpack NiO-fcc-S8-dmc-strongscale.xml"
+            resources:
+              limits:
+                cpu: 1
+                memory: 1Gi
+                vpc.amazonaws.com/efa: 1
+              requests:
+                cpu: 1
+                memory: 1Gi
+                vpc.amazonaws.com/efa: 1
+          tolerations:
+          - key: "launcher"
+            operator: "Exists"
+            effect: "NoSchedule"
+    Worker:
+      replicas: 4
+      template:
+        metadata:
+          app: qmcpack
+          labels:
+            app: qmcpack
+            pod-group.scheduling.sigs.k8s.io: qmcpack
+        spec:
+          #schedulerName: fluence
+          containers:
+          - image: asarkarparsys/llnl:qmcpack_efa_1504
+            imagePullPolicy: Always
+            name: mpi-worker
+            lifecycle:
+              postStart:
+                exec:
+                  command:
+                  - bash
+                  - -c
+                  - "while ! bash -c \"</dev/tcp/localhost/22\" >/dev/null 2>&1; do sleep 0.1; done"
+            command:
+            - /usr/sbin/sshd
+            args:
+            - -De
+            resources:
+              limits:
+                cpu: 2
+                memory: 2Gi
+                vpc.amazonaws.com/efa: 1
+              requests:
+                cpu: 2
+                memory: 2Gi
+                vpc.amazonaws.com/efa: 1
+          tolerations:
+          - key: "worker"
+            operator: "Exists"
+            effect: "NoSchedule"

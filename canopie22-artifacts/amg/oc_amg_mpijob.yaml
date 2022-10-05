@@ -1,0 +1,71 @@
+apiVersion: scheduling.sigs.k8s.io/v1alpha1
+kind: PodGroup
+metadata:
+  name: amg
+spec:
+  scheduleTimeoutSeconds: 500
+  minMember: 1
+---
+apiVersion: kubeflow.org/v2beta1
+kind: MPIJob 
+metadata:          
+  name: amg
+spec:      
+  slotsPerWorker: 4
+  runPolicy:                       
+    cleanPodPolicy: Running                            
+    # ttlSecondsAfterFinished: 60
+  sshAuthMountPath: /home/mpiuser/.ssh
+  mpiReplicaSpecs:                                      
+    Launcher:                       
+      replicas: 1         
+      template:           
+        spec:                                 
+          containers:
+          - image: quay.io/cmisale1/amg:ocp
+            imagePullPolicy: Always
+            name: mpi-launcher
+#            env:
+#            - name: OMP_NUM_THREADS
+#              value: "2"
+#            - name: LD_PRELOAD
+#              value: "libgomp.so.1"
+            command:
+            - bash
+            - -cx 
+            - ". /etc/profile && mpirun --mca orte_launch_agent /opt/view/bin/orted --mca plm_rsh_agent rsh -x PATH -x LD_LIBRARY_PATH -n 1 --oversubscribe --map-by socket amg -problem 1 -n 96 96 96 -P 1 1 1 -printstats"
+            resources:
+              limits:
+                cpu: 1
+                memory: 2Gi
+          tolerations:
+          - key: "launcher"
+            operator: "Exists"
+            effect: "NoSchedule"
+    Worker:
+      replicas: 1
+      template:
+        metadata:
+          app: amg
+          labels:
+            app: amg
+            pod-group.scheduling.sigs.k8s.io: amg
+        spec:
+          schedulerName: fluence
+          containers:
+          - image: quay.io/cmisale1/amg:ocp
+            imagePullPolicy: Always
+            name: worker
+            command:
+            - /usr/sbin/sshd
+            args:
+            - -De
+            - -f
+            - /home/mpiuser/.sshd_config    
+            resources:
+              requests:
+                cpu: 4
+                memory: 8Gi
+              limits:
+                cpu: 4
+                memory: 8Gi
