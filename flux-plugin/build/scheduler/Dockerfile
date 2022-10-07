@@ -87,7 +87,7 @@ ENV PATH "/home/flux-install/bin:$PATH"
 ENV LD_LIBRARY_PATH "/home/flux-install/lib/flux:/home/flux-install/lib"
 RUN flux keygen
 
-RUN  git clone https://github.com/cmisale/flux-sched.git --branch api-kubeflux --single-branch && \ 
+RUN  git clone https://github.com/cmisale/flux-sched.git --branch gobind-dev --single-branch && \ 
     cd /home/flux-sched/ \
 	&& ./autogen.sh && PYTHON_VERSION=3.8 ./configure --prefix=/home/flux-install && make -j && make install \
 	&& cp -r resource/hlapi/bindings/c/.libs/* resource/.libs/* /home/flux-install/lib/ \
