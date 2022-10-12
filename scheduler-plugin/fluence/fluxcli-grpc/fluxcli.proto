@@ -1,0 +1,76 @@
+syntax = "proto3";
+option go_package = "grpc/fluxcli";
+
+package fluxcli;
+
+
+// Service definition
+service FluxcliService {
+    // Sends a Match command
+    rpc Match(MatchRequest) returns (MatchResponse) {}
+    rpc Cancel(CancelRequest) returns (CancelResponse) {}
+}
+
+message PodSpec {
+    string id = 1;
+    string container = 2;
+    int32 cpu = 3;
+    int64 memory = 4;
+    int64 gpu = 5;
+    int64 storage = 6; 
+    repeated string labels = 7;
+}
+
+// The Match request message (allocate, allocate_orelse_reserve)
+message MatchRequest {
+    PodSpec ps = 1;
+    string request = 2;
+    int32 count = 3;
+}
+
+// The Nodes/Cluster Update Status
+message NodeAlloc {
+    string nodeID = 1;
+    int32 tasks = 2;
+}
+
+// The Match response message
+message MatchResponse {
+    string podID = 1;
+    repeated NodeAlloc nodelist = 2;
+    int64 jobID = 3;
+}
+
+message CancelRequest {
+    int64 jobID = 2;
+}
+
+// The Match response message
+message CancelResponse {
+    int64 jobID = 1;
+    int32 error = 2;
+}
+
+
+
+// The Nodes/Cluster Update Status
+message NodeStatus {
+    int32 cpuAvail = 1;
+    int32 gpuAvail = 2;
+    int64 storageAvail = 3;
+    int64 memoryAvail = 4;
+    int64 allowedPods = 5;
+    string nodeIP = 6;
+    int32 replication = 7;
+}
+
+// The JGF response message
+message JGFRequest {
+    string jgf = 1;
+}
+
+
+// The JGF response message
+message JGFResponse {
+    string jgf = 1;
+}
