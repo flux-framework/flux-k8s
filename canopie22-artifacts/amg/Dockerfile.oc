@@ -1,0 +1,117 @@
+FROM ubuntu:20.04 as builder
+
+RUN apt-get update
+RUN DEBIAN_FRONTEND="noninteractive" apt-get -y install \
+    build-essential \
+    gfortran \
+    autotools-dev \
+    autoconf \
+    automake \
+    git \
+    python3 \
+    openssh-server \
+    openssh-client \
+    apt-utils \
+    && apt-get clean \
+    && apt-get autoremove \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+
+# What we want to install and how we want to install it
+# is specified in a manifest file (spack.yaml)
+RUN mkdir /opt/spack-environment \
+    &&  (echo "spack:" \
+    &&   echo "  specs:" \
+    &&   echo "  - openmpi@4.1.2 target=x86_64" \
+    &&   echo "  config:" \
+    &&   echo "    install_tree: /opt/software" \
+    &&   echo "  view: /opt/view") > /opt/spack-environment/spack.yaml
+
+# Install the software, remove unnecessary deps
+RUN cd /opt/spack-environment \
+    && git clone https://github.com/spack/spack.git \
+    && . spack/share/spack/setup-env.sh \
+    && spack env activate . \
+    && spack external find openssh \
+    && spack install --reuse --fail-fast \
+    && spack gc -y
+
+# Strip all the binaries
+RUN find -L /opt/view/* -type f -exec readlink -f '{}' \; | \
+    xargs file -i | \
+    grep 'charset=binary' | \
+    grep 'x-executable\|x-archive\|x-sharedlib' | \
+    awk -F: '{print $1}' | xargs strip -s
+
+# Modifications to the environment that are necessary to run
+RUN cd /opt/spack-environment \
+    && . spack/share/spack/setup-env.sh \
+    && spack env activate --sh -d . >> /etc/profile.d/z10_spack_environment.sh
+
+RUN cd /root
+WORKDIR /root
+RUN git clone --single-branch --branch 1.2 https://github.com/LLNL/AMG.git
+RUN . /etc/profile \
+    && cd AMG \
+    && make
+
+
+# Now we build the AMG image
+FROM ubuntu:20.04
+
+COPY --from=builder /opt/spack-environment /opt/spack-environment
+COPY --from=builder /opt/software /opt/software
+COPY --from=builder /opt/view /opt/view
+COPY --from=builder /etc/profile.d/z10_spack_environment.sh /etc/profile.d/z10_spack_environment.sh
+
+RUN apt-get update
+RUN DEBIAN_FRONTEND="noninteractive" apt-get -y install --no-install-recommends \
+    libnuma-dev \
+    libgomp1 \
+    git curl wget \
+    openssh-server \
+    openssh-client \
+    pdsh \
+    dnsutils \
+    libcap2-bin \
+    && apt-get clean \
+    && apt-get autoremove \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+ARG port=2222
+
+USER root
+
+# Add priviledge separation directoy to run sshd as root.
+RUN mkdir -p /var/run/sshd
+
+# Add capability to run sshd as non-root.
+RUN setcap CAP_NET_BIND_SERVICE=+eip /usr/sbin/sshd
+
+# Allow OpenSSH to talk to containers without asking for confirmation
+# by disabling StrictHostKeyChecking.
+# mpi-operator mounts the .ssh folder from a Secret. For that to work, we need
+# to disable UserKnownHostsFile to avoid write permissions.
+# Disabling StrictModes avoids directory and files read permission checks.
+RUN sed -i "s/[ #]\(.*StrictHostKeyChecking \).*/ \1no/g" /etc/ssh/ssh_config \
+    && echo "    UserKnownHostsFile /dev/null" >> /etc/ssh/ssh_config \
+    && sed -i "s/[ #]\(.*Port \).*/ \1$port/g" /etc/ssh/ssh_config \
+    && sed -i "s/#\(StrictModes \).*/\1no/g" /etc/ssh/sshd_config \
+    && sed -i "s/#\(Port \).*/\1$port/g" /etc/ssh/sshd_config
+
+WORKDIR /home/mpiuser
+RUN useradd mpiuser
+# Configurations for running sshd as non-root.
+COPY --chown=mpiuser sshd_config .sshd_config
+RUN echo "Port $port" >> /home/mpiuser/.sshd_config
+
+RUN echo "    UserKnownHostsFile /dev/null" >> /etc/ssh/ssh_config && \
+    sed -i 's/#\(StrictModes \).*/\1no/g' /etc/ssh/sshd_config
+
+RUN mkdir -p /home/mpiuser/bin
+COPY --from=builder /root/AMG/test/amg /home/mpiuser/bin/
+WORKDIR /home/mpiuser/bin/
+
+RUN chown -hR mpiuser /home/mpiuser
+
+USER mpiuser

@@ -1,0 +1,77 @@
+apiVersion: scheduling.sigs.k8s.io/v1alpha1
+kind: PodGroup
+metadata:
+  name: amg
+spec:
+  scheduleTimeoutSeconds: 600
+  minMember: 1020
+---
+apiVersion: kubeflow.org/v2beta1
+kind: MPIJob 
+metadata:          
+  name: amg
+spec:                                                                                                                  
+  slotsPerWorker: 1
+  runPolicy:                       
+    cleanPodPolicy: Running                            
+  sshAuthMountPath: /root/.ssh
+  mpiReplicaSpecs:                                      
+    Launcher:                       
+      replicas: 1         
+      template:           
+        spec:                                 
+          containers:
+          - image: milroy1/kf-testing:amg-focal-openmpi-4.1.2-amd
+            imagePullPolicy: Always
+            name: mpi-launcher
+            command:
+            - bash
+            - -cx 
+            - ". /etc/profile && time -p mpirun --allow-run-as-root --mca orte_launch_agent /opt/view/bin/orted --mca plm_rsh_agent rsh -x PATH -x LD_LIBRARY_PATH -np %PROCS% --map-by numa --rank-by core --bind-to core amg -n %SIZE% %SIZE% %SIZE% -P %SIZE% %SIZE% %SIZE%"
+            resources:
+              limits:
+                cpu: 6
+                memory: 12Gi
+              requests:
+                cpu: 6
+                memory: 12Gi
+          tolerations:
+          - key: "launcher"
+            operator: "Exists"
+            effect: "NoSchedule"
+    Worker:
+      replicas: 1020
+      template:
+        metadata:
+          app: amg
+          labels:
+            app: amg
+            pod-group.scheduling.sigs.k8s.io: amg
+        spec:
+          schedulerName: fluence
+          containers:
+          - image: milroy1/kf-testing:amg-focal-openmpi-4.1.2-amd
+            imagePullPolicy: Always
+            name: worker
+            lifecycle:
+              postStart:
+                exec:
+                  command:
+                  - bash
+                  - -c
+                  - "while ! bash -c \"</dev/tcp/localhost/22\" >/dev/null 2>&1; do sleep 0.1; done"
+            command:
+            - /usr/sbin/sshd
+            args:
+            - -De
+            resources:
+              limits:
+                cpu: 1
+                memory: 1Gi
+              requests:
+                cpu: 1
+                memory: 1Gi
+          tolerations:
+          - key: "worker"
+            operator: "Exists"
+            effect: "NoSchedule"

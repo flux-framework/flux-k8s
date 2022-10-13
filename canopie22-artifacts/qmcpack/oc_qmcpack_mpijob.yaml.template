@@ -1,0 +1,66 @@
+apiVersion: scheduling.sigs.k8s.io/v1alpha1
+kind: PodGroup
+metadata:
+  name: qmcpack
+spec:
+  scheduleTimeoutSeconds: 10
+  minMember: %REPLICAS%
+---
+apiVersion: kubeflow.org/v2beta1
+kind: MPIJob
+metadata:
+  name: qmcpack
+spec:
+  slotsPerWorker: 1
+  runPolicy:
+    cleanPodPolicy: Running
+    # ttlSecondsAfterFinished: 60
+  sshAuthMountPath: /home/mpiuser/.ssh
+  mpiReplicaSpecs:
+    Launcher:
+      replicas: 1
+      template:
+        spec:
+          containers:
+          - image: quay.io/cmisale1/qmcpack:ocp-strongscaling
+            name: mpi-launcher
+            env:
+            - name: PATH
+              value: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/openmpi/bin"
+            - name: LD_LIBRARY_PATH
+              value: "/opt/openmpi/lib"
+            command:
+            - bash
+            - -cx
+            - "mpirun --mca orte_launch_agent /opt/openmpi/bin/orted -x PATH -x LD_LIBRARY_PATH -n %REPLICAS% --bind-to none --oversubscribe --map-by socket --hostfile /etc/mpi/hostfile /home/mpiuser/bin/qmcpack NiO-fcc-S8-dmc-strongscale.xml"
+            resources:
+              limits:
+                cpu: 1
+                memory: 1Gi
+          tolerations:
+          - key: "launcher"
+            operator: "Exists"
+            effect: "NoSchedule"
+    Worker:
+      replicas: %REPLICAS%
+      template:
+        metadata:
+          app: qmcpack
+          labels:
+            app: qmcpack
+            pod-group.scheduling.sigs.k8s.io: qmcpack
+        spec:
+          schedulerName: fluence
+          containers:
+          - image: quay.io/cmisale1/qmcpack:ocp-strongscaling
+            name: mpi-worker
+            command:
+            - /usr/sbin/sshd
+            args:
+            - -De
+            - -f
+            - /home/mpiuser/.sshd_config    
+            resources:
+              limits:
+                cpu: 2
+                memory: 2Gi
