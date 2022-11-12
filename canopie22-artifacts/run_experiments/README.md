@@ -72,9 +72,9 @@ Depending on the size of your cluster and available nodes configuration, these p
 
 Example invocation for a node with 32 vcpus and 128 GB of memory:
 
-— node_cpu: Number of cores in your node
-— node_mem: Memory in your node
-— num_runs: Number of runs for each benchmark listed in the config file
+- node_cpu: Number of cores in your node
+- node_mem: Memory in your node
+- num_runs: Number of runs for each benchmark listed in the config file
 
 ```raw
 ./run_experiments.py --app_config app-experiment-config.json --node_cpu 32 --node_mem 128 --num_runs 1 --cluster_log cluster.log
