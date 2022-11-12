@@ -212,7 +212,7 @@ def get_operator_logs(client, app_name, start_time, job_id, log_file):
 
 def process_error_handler(e):
     print(e)
-    raise
+    raise e
 
 
 def run(kube_client, apps, num_runs, num_run_configs, node_topology):
