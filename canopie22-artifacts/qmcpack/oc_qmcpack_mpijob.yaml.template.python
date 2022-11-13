@@ -4,7 +4,7 @@ metadata:
   name: qmcpack
 spec:
   scheduleTimeoutSeconds: 10
-  minMember: %REPLICAS%
+  minMember: 1 
 ---
 apiVersion: kubeflow.org/v2beta1
 kind: MPIJob
@@ -32,9 +32,12 @@ spec:
             command:
             - bash
             - -cx
-            - "mpirun --mca orte_launch_agent /opt/openmpi/bin/orted -x PATH -x LD_LIBRARY_PATH -n %REPLICAS% --bind-to none --oversubscribe --map-by socket --hostfile /etc/mpi/hostfile /home/mpiuser/bin/qmcpack NiO-fcc-S8-dmc-strongscale.xml"
+            - "mpirun --mca orte_launch_agent /opt/openmpi/bin/orted -x PATH -x LD_LIBRARY_PATH -n %PROCS% --bind-to none --oversubscribe --map-by socket --hostfile /etc/mpi/hostfile /home/mpiuser/bin/qmcpack NiO-fcc-S8-dmc-strongscale.xml"
             resources:
               limits:
+                cpu: 1
+                memory: 1Gi
+              requests:
                 cpu: 1
                 memory: 1Gi
           tolerations:
@@ -42,7 +45,7 @@ spec:
             operator: "Exists"
             effect: "NoSchedule"
     Worker:
-      replicas: %REPLICAS%
+      replicas: 1
       template:
         metadata:
           app: qmcpack
@@ -62,5 +65,8 @@ spec:
             - /home/mpiuser/.sshd_config    
             resources:
               limits:
+                cpu: 2
+                memory: 2G
+              requests:
                 cpu: 2
                 memory: 2Gi

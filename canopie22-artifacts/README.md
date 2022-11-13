@@ -5,7 +5,7 @@ We provide this documentation for anyone interested in reproducing our work publ
 These benchmarks work on vanilla Kubernetes (e.g., Kind clusters), EKS and OpenShift clusters.
 Each benchmark can be scheduled with either Fluence or with the default kube-scheduler.
 
-## Creating EKS cluster
+## Creating AWS EKS cluster
 
 If you have AWS credentials installed, you can build an EKS cluster with the same configuration (i.e., same Hpc6a EC2 instance type, Kubernetes version, etc.) we used in our study. The `eks-efa-cluster-config.yaml` in the `kube_setup` directory contains options for specifying `placementGroups`, `launcher`, and `worker`managedNodeGroups. Note that if you intend to use EC2 EFA devices that the number of launcher nodes in the EKS configuration must be the same as the number of applications requiring EFA. After modifying the configuration to create the desired cluster name, Kubernetes version, and number of instances, execute:
 
@@ -22,7 +22,7 @@ kubectl create -f kube_setup/mpi-operator.yaml
 ```
 Note that `kube_setup/mpi-operator.yaml` references the MPI Operator container built with our improvements that fix race conditions.
 
-## Deploy EFA
+## Deploy EFA (Only for AWS clusters)
 AWS EFA requires a daemonset to make the devices available to EKS pods.  To start the daemonset on all nodes (including the launcher):
 ```bash
 kubectl create -f kube_setup/efa-daemonset.yaml
@@ -40,7 +40,7 @@ Apply a taint to worker nodes which corresponds to the toleration set in each wo
 ./taint_workers.sh
 ```
 
-## Running experiments with AMG, LAMMPS, and QMCPACK
+# Running experiments with AMG, LAMMPS, and QMCPACK
 The `run_experiments.py` script in the `run_experiments` directory allows you to run combinations of the three CORAL-2 benchmarks or other containerized, MPI Operator-based applications with the Fluence and default kube-scheduler. The `run_experiments` directory contains a README with specific instructions for running and configuring the experiments.
 
 ## MPI Job YAMLs

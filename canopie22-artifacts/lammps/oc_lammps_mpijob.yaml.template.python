@@ -1,20 +1,20 @@
 apiVersion: scheduling.sigs.k8s.io/v1alpha1
 kind: PodGroup
 metadata:
-  name: amg
+  name: lammps
 spec:
   scheduleTimeoutSeconds: 500
-  minMember: %REPLICAS%
+  minMember: 200
 ---
 apiVersion: kubeflow.org/v2beta1
 kind: MPIJob 
 metadata:          
-  name: amg
-spec:      
+  name: lammps
+spec:                 
   slotsPerWorker: 4
   runPolicy:                       
     cleanPodPolicy: Running                            
-    # ttlSecondsAfterFinished: 60
+    #    ttlSecondsAfterFinished: 60
   sshAuthMountPath: /home/mpiuser/.ssh
   mpiReplicaSpecs:                                      
     Launcher:                       
@@ -22,38 +22,41 @@ spec:
       template:           
         spec:                                 
           containers:
-          - image: quay.io/cmisale1/amg:ocp
+          - image: quay.io/cmisale1/lammps:ocp
             imagePullPolicy: Always
             name: mpi-launcher
-#            env:
-#            - name: OMP_NUM_THREADS
-#              value: "2"
-#            - name: LD_PRELOAD
-#              value: "libgomp.so.1"
+            env:
+            - name: OMP_NUM_THREADS
+              value: "2"
+            - name: LD_PRELOAD
+              value: "libgomp.so.1"
             command:
             - bash
             - -cx 
-            - ". /etc/profile && mpirun --mca orte_launch_agent /opt/view/bin/orted --mca plm_rsh_agent rsh -x PATH -x LD_LIBRARY_PATH -n %REPLICAS% --oversubscribe --map-by socket amg -problem 1 -n 96 96 96 -P %P% -printstats"
+            - ". /etc/profile && mpirun --mca orte_launch_agent /opt/view/bin/orted --mca plm_rsh_agent rsh -x PATH -x LD_LIBRARY_PATH -n %PROCS% --map-by core lmp %PROBLEM_SIZE% -in in.reaxc.hns -nocite"
             resources:
               limits:
-                cpu: 1
-                memory: 2Gi
+                cpu: 2
+                memory: 1Gi
+              requests:
+                cpu: 2
+                memory: 1Gi
           tolerations:
           - key: "launcher"
             operator: "Exists"
             effect: "NoSchedule"
     Worker:
-      replicas: %REPLICAS%
+      replicas: 200
       template:
         metadata:
-          app: amg
-          labels:
-            app: amg
-            #pod-group.scheduling.sigs.k8s.io: amg
+            app: lammps
+            labels:
+              app: lammps
+              pod-group.scheduling.sigs.k8s.io: lammps
         spec:
           schedulerName: fluence
           containers:
-          - image: quay.io/cmisale1/amg:ocp
+          - image: quay.io/cmisale1/lammps:ocp
             imagePullPolicy: Always
             name: worker
             command:
@@ -61,11 +64,12 @@ spec:
             args:
             - -De
             - -f
-            - /home/mpiuser/.sshd_config    
+            - /home/mpiuser/.sshd_config   
             resources:
-              requests:
-                cpu: 2
-                memory: 4Gi
               limits:
-                cpu: 2
-                memory: 4Gi
+                cpu: 4
+                memory: 5Gi
+              requests:
+                cpu: 4
+                memory: 5Gi
+
