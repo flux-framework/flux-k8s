@@ -1,0 +1,105 @@
+[
+    {
+        "metadata": {
+            "name": "lammps",
+            "template_path": "../lammps/lammps_mpijob_efa.yaml",
+            "log_dir": "triple_test",
+            "tmp_file": "lammps_tmp.yaml",
+        },
+        "spec": {
+            "launcher_cpus": 30,
+            "launcher_memory_gb": 100,
+            # "exp_config" is a list of dictionaries. Supported keys are: ranks, pods, 
+            # cpus_per_pod, slots_per_pod, and pod_memory_gb. pod_memory_gb overrides 
+            # the default behavior of each pod getting memory proportional to the 
+            # CPU fraction it requests. pod_memory_gb is optional.
+            "exp_config": [
+                { 
+                  "ranks": 72,
+                  "pods": 1,
+                  "cpus_per_pod": 72,
+                  "slots_per_pod": 72,
+                  "pod_memory_gb": 300,
+                },
+                { 
+                  "ranks": 72,
+                  "pods": 1,
+                  "cpus_per_pod": 72,
+                  "slots_per_pod": 72,
+                  "pod_memory_gb": 300,
+                }
+              ],
+            # The following is LAMMPS-specific
+            "problem_size": "-v x 64 -v y 16 -v z 8"
+        },
+    },
+    {
+        "metadata": {
+            "name": "amg",
+            "template_path": "../amg/amg_mpijob.yaml",
+            "log_dir": "triple_test",
+            "tmp_file": "amg_tmp.yaml",
+        },
+        "spec": {
+            "launcher_cpus": 30,
+            "launcher_memory_gb": 100,
+            # "exp_config" is a list of dictionaries. Supported keys are: ranks, pods, 
+            # cpus_per_pod, slots_per_pod, and pod_memory_gb. pod_memory_gb overrides 
+            # the default behavior of each pod getting memory proportional to the 
+            # CPU fraction it requests. pod_memory_gb is optional.
+            "exp_config": [
+                {
+                  "ranks": 16,
+                  "pods": 1,
+                  "cpus_per_pod": 16,
+                  "slots_per_pod": 16,
+                  "pod_memory_gb": 60,
+                },
+                {
+                  "ranks": 16,
+                  "pods": 1,
+                  "cpus_per_pod": 16,
+                  "slots_per_pod": 16,
+                  "pod_memory_gb": 60,
+                },
+              ],
+            # The following two keys are AMG specific.
+            # The rank_topology list must have the same length as exp_config, and each element corresponds to one "-P" AMG setting.
+            "rank_topology": ["4 2 2", "4 2 2"],
+            # per_rank_size corresponds to "-n" option in AMG and is fixed for weak scaling
+            "per_rank_size": "128 128 128"
+        },
+    },
+    {
+        "metadata": {
+            "name": "qmcpack",
+            "template_path": "../qmcpack/qmcpack_strongscaling_efa_mpijob.yaml",
+            "log_dir": "triple_test",
+            "tmp_file": "qmcpack_tmp.yaml",
+        },
+        "spec": {
+            "launcher_cpus": 30,
+            "launcher_memory_gb": 100,
+            # "exp_config" is a list of dictionaries. Supported keys are: ranks, pods, 
+            # cpus_per_pod, slots_per_pod, and pod_memory_gb. pod_memory_gb overrides 
+            # the default behavior of each pod getting memory proportional to the 
+            # CPU fraction it requests. pod_memory_gb is optional.
+            "exp_config": [
+                { 
+                  "ranks": 188,
+                  "pods": 2,
+                  "cpus_per_pod": 94,
+                  "slots_per_pod": 94,
+                  "pod_memory_gb": 340,
+                },
+                {
+                  "ranks": 188,
+                  "pods": 2,
+                  "cpus_per_pod": 94,
+                  "slots_per_pod": 94,
+                  "pod_memory_gb": 340,
+                },
+              ],
+        },
+    },
+]
