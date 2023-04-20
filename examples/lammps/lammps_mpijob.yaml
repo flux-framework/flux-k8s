@@ -1,0 +1,73 @@
+apiVersion: scheduling.sigs.k8s.io/v1alpha1
+kind: PodGroup
+metadata:
+  name: lammps
+spec:
+  scheduleTimeoutSeconds: 600
+  minMember: 4
+---
+apiVersion: kubeflow.org/v2beta1
+kind: MPIJob 
+metadata:          
+  name: lammps
+spec:                                                                                                                  
+  slotsPerWorker: 1
+  runPolicy:                       
+    cleanPodPolicy: Running                            
+  sshAuthMountPath: /root/.ssh
+  mpiReplicaSpecs:                                      
+    Launcher:                       
+      replicas: 1         
+      template:           
+        spec:                                 
+          containers:
+          - image: milroy1/kf-testing:lammps-focal-openmpi-4.1.2
+            imagePullPolicy: Always
+            name: mpi-launcher
+            command:
+            - bash
+            - -cx 
+            - ". /etc/profile && time -p mpirun --allow-run-as-root --mca orte_launch_agent /opt/view/bin/orted --mca plm_rsh_agent rsh -x PATH -x LD_LIBRARY_PATH -np %PROCS% --map-by socket lmp %PROBLEM_SIZE% -in in.reaxc.hns -nocite"
+            resources:
+              limits:
+                cpu: 12
+                memory: 24Gi
+              requests:
+                cpu: 12
+                memory: 24Gi
+          tolerations:
+          - key: "launcher"
+            operator: "Exists"
+            effect: "NoSchedule"
+    Worker:
+      replicas: 24
+      template:
+        metadata:
+          app: lammps
+          labels:
+            app: lammps
+            pod-group.scheduling.sigs.k8s.io: lammps
+        spec:
+          schedulerName: fluence
+          containers:
+          - image: milroy1/kf-testing:lammps-focal-openmpi-4.1.2
+            imagePullPolicy: Always
+            name: worker
+            lifecycle:
+              postStart:
+                exec:
+                  command:
+                  - bash
+                  - -c
+                  - "while ! bash -c \"</dev/tcp/localhost/22\" >/dev/null 2>&1; do sleep 0.1; done"
+            command:
+            - /usr/sbin/sshd
+            args:
+            - -De
+            resources:
+              limits:
+                cpu: 1
+                memory: 2Gi
+              requests:
+                cpu: 1
+                memory: 2Gi

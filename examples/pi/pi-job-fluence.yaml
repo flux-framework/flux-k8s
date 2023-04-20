@@ -1,0 +1,21 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pi-job-fluence-sched
+spec:
+  completions: 4
+  template:
+    metadata:
+      labels:
+        app: pi-test-fluence
+    spec:
+      schedulerName: fluence # comment this out to get it scheduled by the default scheduler
+      containers:
+      - name: pi-test
+        image: quay.io/eduardoarango/pi:ubi8
+        resources:
+          limits:
+            cpu: "8"
+          requests:
+            cpu: "8"
+      restartPolicy: Never      

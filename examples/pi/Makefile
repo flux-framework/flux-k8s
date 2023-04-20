@@ -40,16 +40,16 @@ clean-image:
 	@echo "Cleaning Docker image...";
 	docker rmi -f ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG} ${DOCKER_IMAGE_NAME}:latest localhost:5000/${DOCKER_IMAGE_NAME}:latest
 
-setup-kubeflux:
+setup-fluence:
 	kubectl create -f ./rbac.yaml
 	kubectl create -f ./kubesched.yaml
 
-reset-kubeflux:
+reset-fluence:
 	kubectl delete -f ./kubesched.yaml
 	kubectl create -f ./kubesched.yaml
 
-check-kubeflux:
-	kubectl get pod -l app=kubeflux -n kube-system
+check-fluence:
+	kubectl get pod -l app=fluence -n kube-system
 
 delete-kind:
 	kind delete cluster --name xyl-kind
