@@ -8,7 +8,7 @@ Fluence enables HPC-grade pod scheduling in Kubernetes via the [Kubernetes Sched
 
 ## Getting started
 
-For instructions on how to start Fluence on a K8s cluster, see [examples](examples/). Documentation and instructions for reproducing our CANOPIE2022 paper (citation below) can be found in the [canopie22-artifacts branch](/../canopie22-artifacts/canopie22-artifacts).
+For instructions on how to start Fluence on a K8s cluster, see [examples](examples/). Documentation and instructions for reproducing our CANOPIE2022 paper (citation below) can be found in the [canopie22-artifacts branch](https://github.com/flux-framework/flux-k8s/tree/canopie22-artifacts).
 
 For background on the Flux framework and the Fluxion scheduler, you can take a look at our award-winning R&D100 submission: https://ipo.llnl.gov/sites/default/files/2022-02/Flux_RD100_Final.pdf
 
@@ -21,6 +21,15 @@ To build and test Fluence, you will need:
  - A Kubernetes cluster for testing, e.g., you can deploy one with [kind](https://kind.sigs.k8s.io/docs/user/quick-start/)
 
 ### Building Fluence
+
+There are two images we will be building:
+
+ - the scheduler sidecar: built from the repository here
+ - the scheduler: built from [this branch of scheduler-plugins](https://github.com/openshift-psap/scheduler-plugins/blob/fluence/build/scheduler/Dockerfile)
+
+We will be adding more notes about how these containers work together.
+
+#### Build Sidecar
 
 To build the plugin containers, cd into [scheduler-plugins](./scheduler-plugins) and run `make`:
 
@@ -40,6 +49,32 @@ here we push to the result of the build above:
 
 ```bash
 docker push docker.io/vanessa/fluence-sidecar:latest
+```
+
+#### Build Scheduler
+
+First, clone the repository:
+
+```bash
+$ git clone -b fluence https://github.com/openshift-psap/scheduler-plugins ./plugins
+```
+
+And build! You'll most likely want to set a custom registry and image name again:
+
+```bash
+# This will build to localhost
+$ make local-image
+
+# this will build to docker.io/vanessa/fluence
+$ make local-image LOCAL_REGISTRY=vanessa LOCAL_IMAGE=fluence
+```
+
+**Important** the make command above produces _two images_ and you want to use the first that is mentioned in the output (not the second, which is a controller).
+
+And push to your registry for later!
+
+```bash
+$ docker push docker.io/vanessa/fluence
 ```
 
 ### Prepare Cluster
@@ -142,11 +177,18 @@ that you can follow, and will direct you to the [examples/demo_setup](./examples
 $ cd ./examples/simple_example
 ```
 
-**Important** change the name of the container in [examples/simple_example/fluence_setup/04_scheduler-plugin.yaml](examples/simple_example/fluence_setup/04_scheduler-plugin.yaml) to be the container you just built:
+**Important** change the name of the containers in [examples/simple_example/fluence_setup/04_scheduler-plugin.yaml](examples/simple_example/fluence_setup/04_scheduler-plugin.yaml) to be the containers you just built -
+one for the primary container, and one for the sidecar:
 
 ```diff
 - - image: quay.io/cmisale/fluence-sidecar:latest
 + - image: vanessa/fluence-sidecar:latest
+```
+and
+
+```diff
+- - image: quay.io/cmisale1/fluence:upstream
++ - image: vanessa/fluence:latest
 ```
 
 And create the plugin assets (deployment, roles, etc.):
@@ -158,7 +200,7 @@ $ kubectl apply -f ./fluence_setup
 Check that your pods / deployment are OK:
 
 ```bash
-$  kubectl get pods -n scheduler-plugins 
+$ kubectl get pods -n scheduler-plugins 
 ```
 ```console
 NAME                       READY   STATUS    RESTARTS   AGE
@@ -175,7 +217,7 @@ NAME      READY   UP-TO-DATE   AVAILABLE   AGE
 fluence   1/1     1            1           10m
 ```
 
-And early (mostly empty) logs:
+And early (mostly empty) logs for the sidecar container `fluence-sidecar`:
 
 ```bash
 $ kubectl logs -n scheduler-plugins fluence-787549d4dd-cs22k 
@@ -192,6 +234,12 @@ Node  kind-control-plane  total mem  16132255744
 Can request at most  6  exclusive cpu
 Match policy:  {"matcher_policy": "lonode"}
 [GRPCServer] gRPC Listening on [::]:4242
+```
+
+And for the fluence container:
+
+```bash
+$ kubectl logs -n scheduler-plugins fluence-7f9cfd87bf-gbl58 -c fluence
 ```
 
 And then we want to deploy two pods, one assigned to the `default-scheduler` and the other
@@ -269,7 +317,9 @@ pod/fluence-scheduled-pod         spec.containers{fluence-scheduled-container}  
 pod/fluence-scheduled-pod         spec.containers{fluence-scheduled-container}            kubelet,
 pod/fluence-scheduled-pod         spec.containers{fluence-scheduled-container}            kubelet,
 ```
+
 There might be a better way to see that? Anyway, really cool! For the above, I found [this page](https://kubernetes.io/docs/tasks/extend-kubernetes/configure-multiple-schedulers/#enable-leader-election) very helpful.
+
 
 ## Papers
 
