@@ -1,8 +1,13 @@
 apiVersion: v1
+kind: Namespace
+metadata:
+  name: scheduler-plugins
+---
+apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: scheduler-plugins
-  namespace: default
+  namespace: scheduler-plugins
 ---
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
@@ -77,7 +82,7 @@ kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
   name: scheduler-plugins
-  namespace: default
+  namespace: scheduler-plugins
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -85,4 +90,4 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: scheduler-plugins
-    namespace: default
+    namespace: scheduler-plugins 

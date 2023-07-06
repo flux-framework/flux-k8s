@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: fluence
+  namespace: scheduler-plugins
 spec:
   replicas: 1
   selector:
@@ -20,7 +21,6 @@ spec:
           - /go/src/fluence/bin/server
           - --policy=lonode
           name: fluence-sidecar
-          # TODO where does this come from?
         - image: quay.io/cmisale1/fluence:upstream
           imagePullPolicy: Always
           command:

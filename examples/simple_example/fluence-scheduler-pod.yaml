@@ -1,11 +1,11 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: annotation-second-scheduler
+  name: fluence-scheduled-pod
   labels:
-    name: multischeduler-example
+    name: scheduler-example
 spec:
   schedulerName: fluence
   containers:
-  - name: pod-with-second-annotation-container
+  - name: fluence-scheduled-container
     image: registry.k8s.io/pause:2.0
