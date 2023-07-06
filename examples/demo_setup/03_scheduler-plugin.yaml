@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fluence
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      component: scheduler
+  template:
+    metadata:
+      labels:
+        component: scheduler
+    spec:
+      serviceAccountName: scheduler-plugins
+      containers:
+        - image: vanessa/fluence-sidecar:latest
+          imagePullPolicy: Always
+          command:
+          - /go/src/fluence/bin/server
+          - --policy=lonode
+          name: fluence-sidecar
+          # TODO where does this come from?
+        - image: quay.io/cmisale1/fluence:upstream
+          imagePullPolicy: Always
+          command:
+          - /bin/kube-scheduler
+          - --config=/etc/kubernetes/scheduler-config.yaml
+          - -v=9
+          name: fluence
+          resources:
+            requests:
+              cpu: '0.1'
+          securityContext:
+            privileged: false
+          volumeMounts:
+          - mountPath: /etc/kubernetes
+            name: scheduler-config
+      tolerations:
+        - effect: NoSchedule
+          key: launcher
+          operator: Exists
+      hostNetwork: false
+      hostPID: false
+      volumes:
+      - name: scheduler-config
+        configMap:
+          name: scheduler-config

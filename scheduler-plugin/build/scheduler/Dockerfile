@@ -71,12 +71,12 @@ WORKDIR /home/
 RUN git clone https://github.com/flux-framework/flux-core.git 
 
 RUN cd /home/flux-core/ && ./autogen.sh && PYTHON_VERSION=3 ./configure --prefix=/home/flux-install \ 
-    && make -j && make install && cd /home && rm -rf /home/flux-core
+    && make && make install && cd /home && rm -rf /home/flux-core
 
-# Install go 16
+# Install go 19
 WORKDIR /home
-RUN wget https://dl.google.com/go/go1.16.10.linux-amd64.tar.gz  && tar -xvf go1.16.10.linux-amd64.tar.gz && \
-         mv go /usr/local  &&  rm go1.16.10.linux-amd64.tar.gz
+RUN wget https://go.dev/dl/go1.19.10.linux-amd64.tar.gz  && tar -xvf go1.19.10.linux-amd64.tar.gz && \
+         mv go /usr/local && rm go1.19.10.linux-amd64.tar.gz
 
 ENV GOROOT "/usr/local/go"
 ENV GOPATH "/go"
@@ -87,13 +87,14 @@ ENV PATH "/home/flux-install/bin:$PATH"
 ENV LD_LIBRARY_PATH "/home/flux-install/lib/flux:/home/flux-install/lib"
 RUN flux keygen
 
-RUN  git clone https://github.com/cmisale/flux-sched.git --branch gobind-dev --single-branch && \ 
+RUN git clone https://github.com/cmisale/flux-sched.git --branch golang-pr --single-branch && \ 
     cd /home/flux-sched/ \
-	&& ./autogen.sh && PYTHON_VERSION=3.8 ./configure --prefix=/home/flux-install && make -j && make install \
-	&& cp -r resource/hlapi/bindings/c/.libs/* resource/.libs/* /home/flux-install/lib/ \
-	&& cp -r resource/hlapi/bindings/go/src/fluxcli /go/src/ \
-	&& mv  resource/hlapi/bindings /tmp \
-	&& cd /home && mkdir -p flux-sched/resource/hlapi && mv /tmp/bindings flux-sched/resource/hlapi
+	&& ./autogen.sh && PYTHON_VERSION=3.8 ./configure --prefix=/home/flux-install && make && make install
+RUN	cd /home/flux-sched && \
+    cp -r resource/reapi/bindings/c/.libs/* resource/.libs/* /home/flux-install/lib/ \
+	&& cp -r resource/reapi/bindings/go/src/fluxcli /go/src/ \
+	&& mv  resource/reapi/bindings /tmp \
+	&& cd /home && mkdir -p flux-sched/resource/reapi && mv /tmp/bindings flux-sched/resource/reapi
 
 RUN apt purge -y git  python3-dev \
     python3-cffi \
@@ -105,65 +106,20 @@ RUN apt purge -y git  python3-dev \
     python3-setuptools \
     && apt -y clean && apt -y autoremove
 
-
-
-
-
 # BUILD SHARED LIBRARY
-
 # RUN cp -r /go/src/fluxcli /usr/local/go/src/
 # WORKDIR /usr/local/go/src/fluxcli
 
-
-
 # RUN CGO_CFLAGS="-I/root/flux-sched/resource/hlapi/bindings/c -I/root/flux-install/include" CGO_LDFLAGS="-L/root/flux-install/lib/ -lreapi_cli  -L/root/flux-install/lib/ -lresource -lstdc++ -lczmq -ljansson -lhwloc -lboost_system -L/root/flux-install/lib -lflux-hostlist -lboost_graph -lyaml-cpp" go install -buildmode=shared -linkshared fluxcli
-
+ENV PATH=/usr/local/go/bin:$PATH
 RUN apt -y update && apt -y upgrade && apt install --no-install-recommends -y protobuf-compiler curl && \
- go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.26 && \ 
- go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.1
-
-ENV PATH "$PATH:/go/bin"
+   go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.26 && \ 
+   go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.1
 
 COPY fluence /go/src/fluence/
 COPY Makefile /go/src/fluence/
 WORKDIR /go/src/fluence/
 RUN go mod tidy
 RUN make server
-
 RUN mkdir -p /home/data/jobspecs && mkdir -p /home/data/jgf
 RUN chmod -R ugo+rwx /home/data
-
-# FROM ubuntu:latest
-
-# # Copy Flux libraries and headers
-# COPY --from=basegoflux /home/flux-sched /home/flux-sched/
-# COPY --from=basegoflux /home/flux-install /home/flux-install/
-# COPY --from=basegoflux /go /go/
-
-# # Reinstall dependencies we need
-# #Fluxion
-# RUN  apt -y upgrade && apt -u update && apt -y clean && apt-get -y autoremove
-
-# RUN DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && apt -y --no-install-recommends install \
-#     libhwloc-dev \
-#     libboost-dev \
-#     libboost-system-dev \
-#     libboost-filesystem-dev \
-#     libboost-graph-dev \
-#     libboost-regex-dev \
-#     libxml2-dev \
-#     libyaml-cpp-dev \ 
-#     libsodium-dev \
-#     libzmq3-dev \
-#     libczmq-dev \
-#     uuid-dev \
-#     libjansson-dev \
-#     liblz4-dev \
-#     libhwloc-dev \
-#     libsqlite3-dev \
-#     wget \
-#     make \
-#     libc6-dev  \
-#     lua5.1 liblua5.1-dev lua-posix && apt-get -y clean  && apt-get -y autoremove && rm -rf /var/lib/apt/lists/*
-# RUN mkdir -p /home/data/jobspecs && mkdir -p /home/data/jgf
-# RUN chmod -R ugo+rwx /home/data
