@@ -88,15 +88,20 @@ create a local one with `kind`:
 $ kind create cluster
 ```
 
+### Install Fluence
+
 For some background, the [Scheduling Framework](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/) provided by
 Kubernetes means that our container is going to provide specific endpoints to allow for custom scheduling.
-To make it possible to use our own plugin, we need to install [kubernetes-sigs/scheduler-plugins](https://github.com/kubernetes-sigs/scheduler-plugins),
-which will be done through Helm charts. We will be customizing the values.yaml file to point to our image.
-First, clone the repository:
+To make it possible to use our own plugin, we need to install our fork of [kubernetes-sigs/scheduler-plugins](https://github.com/kubernetes-sigs/scheduler-plugins) at [openshift-psap/scheduler-plugins](https://github.com/openshift-psap/scheduler-plugins.git) which will be done through Helm charts. We will be customizing the values.yaml file to point to our image. First, clone the repository:
 
 ```bash
-git clone git@github.com:kubernetes-sigs/scheduler-plugins.git
-cd scheduler-plugins/manifests/install/charts
+$ git clone https://github.com/openshift-psap/scheduler-plugins.git -b fluence
+```
+
+Install the charts, using the images you just built:
+
+```bash
+$ cd scheduler-plugins/manifests/install/charts
 ```
 
 Here is how to see values allowed. Note the name of the directory - "as-a-second-scheduler" - this is what we are going to be doing - installing
@@ -116,35 +121,27 @@ $ helm show values as-a-second-scheduler/
 # Declare variables to be passed into your templates.
 
 scheduler:
-  name: scheduler-plugins-scheduler
-  image: registry.k8s.io/scheduler-plugins/kube-scheduler:v0.25.7
+  name: fluence
+  # image: k8s.gcr.io/scheduler-plugins/kube-scheduler:v0.23.10
+  image: quay.io/cmisale1/fluence:upstream
+  namespace: scheduler-plugins
   replicaCount: 1
   leaderElect: false
+  sidecarimage: quay.io/cmisale1/fluence-sidecar:latest
+  policy: lonode
 
 controller:
   name: scheduler-plugins-controller
-  image: registry.k8s.io/scheduler-plugins/controller:v0.25.7
+  image: k8s.gcr.io/scheduler-plugins/controller:v0.23.10
+  namespace: scheduler-plugins
   replicaCount: 1
 
 # LoadVariationRiskBalancing and TargetLoadPacking are not enabled by default
 # as they need extra RBAC privileges on metrics.k8s.io.
 
 plugins:
-  enabled: ["Coscheduling","CapacityScheduling","NodeResourceTopologyMatch","NodeResourcesAllocatable"]
-  disabled: ["PrioritySort"] # only in-tree plugins need to be defined here
-
-# Customize the enabled plugins' config.
-# Refer to the "pluginConfig" section of manifests/<plugin>/scheduler-config.yaml.
-# For example, for Coscheduling plugin, you want to customize the permit waiting timeout to 10 seconds:
-pluginConfig:
-- name: Coscheduling
-  args:
-    permitWaitingTimeSeconds: 10 # default is 60
-# Or, customize the other plugins
-# - name: NodeResourceTopologyMatch
-#   args:
-#     scoringStrategy:
-#       type: MostAllocated # default is LeastAllocated
+  enabled: ["Fluence"]
+  disabled: ["CapacityScheduling","NodeResourceTopologyMatch","NodeResourcesAllocatable","PrioritySort","Coscheduling"] # only in-tree plugins need to be defined here
 ```
 
 </details>
@@ -153,77 +150,33 @@ Note that this plugin is going to allow us to create a Deployment with our plugi
 So we are good installing the defaults.
 
 ```bash
-helm install scheduler-plugins as-a-second-scheduler/
+$ helm install \
+  --set scheduler.image=vanessa/fluence:latest \
+  --set scheduler.sidecarimage=vanessa/fluence-sidecar \
+    schedscheduler-plugins as-a-second-scheduler/
 ```
 
 The installation process will run one scheduler and one controller pod for the Scheduler Plugin Framework in the default namespace.
 You can double check that everything is running as follows:
 
 ```bash
-$ kubectl get  pods 
+$ kubectl get pods -n scheduler-plugins
 ```
 ```console
-NAME                                           READY   STATUS    RESTARTS   AGE
-scheduler-plugins-controller-ccbc6dcf5-qdkmw   1/1     Running   0          64s
-scheduler-plugins-scheduler-594968bf65-4dknk   1/1     Running   0          64s
+NAME                                            READY   STATUS    RESTARTS   AGE
+fluence-6bbcbc6bbf-xjfx6                        2/2     Running   0          2m35s
+scheduler-plugins-controller-787757d8b8-ss5qv   1/1     Running   0          2m35s
 ```
 
-### Deploy Fluence
-
-We will need to use a Kubernetes Deployment to deploy fluence as a sidecar container! We have several examples in [examples](examples)
-that you can follow, and will direct you to the [examples/demo_setup](./examples/demo_setup) example for this tutorial. From the root of the repository again:
+Wait until the pods are running! You've just deployed Fluence, congratulations!
+Let's now check logs for containers to check that everything is OK.
+First, let's look at logs for the sidecar container:
 
 ```bash
-$ cd ./examples/simple_example
-```
-
-**Important** change the name of the containers in [examples/simple_example/fluence_setup/04_scheduler-plugin.yaml](examples/simple_example/fluence_setup/04_scheduler-plugin.yaml) to be the containers you just built -
-one for the primary container, and one for the sidecar:
-
-```diff
-- - image: quay.io/cmisale/fluence-sidecar:latest
-+ - image: vanessa/fluence-sidecar:latest
-```
-and
-
-```diff
-- - image: quay.io/cmisale1/fluence:upstream
-+ - image: vanessa/fluence:latest
-```
-
-And create the plugin assets (deployment, roles, etc.):
-
-```bash
-$ kubectl apply -f ./fluence_setup
-```
-
-Check that your pods / deployment are OK:
-
-```bash
-$ kubectl get pods -n scheduler-plugins 
+$ kubectl logs -n scheduler-plugins fluence-6bbcbc6bbf-xjfx6 
 ```
 ```console
-NAME                       READY   STATUS    RESTARTS   AGE
-fluence-787549d4dd-cs22k   2/2     Running   0          10m
-```
-
-And deployments:
-
-```bash
-$ kubectl get deployments.apps -n scheduler-plugins 
-```
-```console
-NAME      READY   UP-TO-DATE   AVAILABLE   AGE
-fluence   1/1     1            1           10m
-```
-
-And early (mostly empty) logs for the sidecar container `fluence-sidecar`:
-
-```bash
-$ kubectl logs -n scheduler-plugins fluence-787549d4dd-cs22k 
-```
-```console
-Defaulted container "fluence-sidecar" out of: fluence-sidecar, fluence
+Defaulted container "sidecar" out of: sidecar, scheduler-plugins-scheduler
 This is the fluxion grpc server
 Created cli context  &{}
 &{}
@@ -239,7 +192,17 @@ Match policy:  {"matcher_policy": "lonode"}
 And for the fluence container:
 
 ```bash
-$ kubectl logs -n scheduler-plugins fluence-7f9cfd87bf-gbl58 -c fluence
+$ kubectl logs -n scheduler-plugins fluence-6bbcbc6bbf-xjfx6 -c scheduler-plugins-scheduler
+```
+
+If you haven't done anything, you'll likely just see health checks.
+
+### Deploy Pods
+
+Let's now run a simple example! Change directory into this directory:
+
+```bash
+cd ../../../../examples/simple_example
 ```
 
 And then we want to deploy two pods, one assigned to the `default-scheduler` and the other
@@ -257,13 +220,23 @@ $ kubectl apply -f default-scheduler-pod.yaml
 $ kubectl apply -f fluence-scheduler-pod.yaml
 ```
 
-
 Once it was created, aside from checking that it ran OK, I could verify by looking at the scheduler logs again:
 
 ```bash
-$ kubectl logs -n scheduler-plugins fluence-787549d4dd-cs22k 
+$ kubectl logs -n scheduler-plugins fluence-6bbcbc6bbf-xjfx6
 ```
 ```bash
+Defaulted container "sidecar" out of: sidecar, scheduler-plugins-scheduler
+This is the fluxion grpc server
+Created cli context  &{}
+&{}
+Number nodes  1
+node in flux group  kind-control-plane
+Node  kind-control-plane  flux cpu  6
+Node  kind-control-plane  total mem  16132255744
+Can request at most  6  exclusive cpu
+Match policy:  {"matcher_policy": "lonode"}
+[GRPCServer] gRPC Listening on [::]:4242
 Labels  []   0
 No labels, going with plain JobSpec
 [JobSpec] JobSpec in YAML:
@@ -284,20 +257,20 @@ tasks:
   count:
     per_slot: 1
 
-[GRPCServer] Received Match request ps:{id:"annotation-second-scheduler" cpu:1} request:"allocate" count:1
+[GRPCServer] Received Match request ps:{id:"fluence-scheduled-pod" cpu:1} request:"allocate" count:1
 
-        ----Match Allocate output---
+	----Match Allocate output---
 jobid: 1
 reserved: false
 allocated: {"graph": {"nodes": [{"id": "3", "metadata": {"type": "core", "basename": "core", "name": "core0", "id": 0, "uniq_id": 3, "rank": -1, "exclusive": true, "unit": "", "size": 1, "paths": {"containment": "/k8scluster0/1/kind-control-plane2/core0"}}}, {"id": "2", "metadata": {"type": "node", "basename": "kind-control-plane", "name": "kind-control-plane2", "id": 2, "uniq_id": 2, "rank": -1, "exclusive": false, "unit": "", "size": 1, "paths": {"containment": "/k8scluster0/1/kind-control-plane2"}}}, {"id": "1", "metadata": {"type": "subnet", "basename": "", "name": "1", "id": 0, "uniq_id": 1, "rank": -1, "exclusive": false, "unit": "", "size": 1, "paths": {"containment": "/k8scluster0/1"}}}, {"id": "0", "metadata": {"type": "cluster", "basename": "k8scluster", "name": "k8scluster0", "id": 0, "uniq_id": 0, "rank": -1, "exclusive": false, "unit": "", "size": 1, "paths": {"containment": "/k8scluster0"}}}], "edges": [{"source": "2", "target": "3", "metadata": {"name": {"containment": "contains"}}}, {"source": "1", "target": "2", "metadata": {"name": {"containment": "contains"}}}, {"source": "0", "target": "1", "metadata": {"name": {"containment": "contains"}}}]}}
 
 at: 0
-overhead: 0.000383
+overhead: 0.000549
 error: 0
 [MatchRPC] Errors so far: 
 FINAL NODE RESULT:
  [{node kind-control-plane2 kind-control-plane 1}]
-[GRPCServer] Response podID:"annotation-second-scheduler" nodelist:{nodeID:"kind-control-plane" tasks:1} jobID:1 
+[GRPCServer] Response podID:"fluence-scheduled-pod" nodelist:{nodeID:"kind-control-plane" tasks:1} jobID:1 
 ```
 
 I was trying to look for a way to see the assignment, and maybe we can see it here (this is the best I could come up with!)
@@ -307,15 +280,17 @@ $ kubectl get events -o wide
 ```
 ```console
 $ kubectl get events -o wide |  awk {'print $4" " $5" " $6'} | column -t
-REASON                            OBJECT                                                  SUBOBJECT
-pod/default-scheduler-pod         default-scheduler                                       Successfully
-pod/default-scheduler-pod         spec.containers{default-scheduler-container}            kubelet,
-pod/default-scheduler-pod         spec.containers{default-scheduler-container}            kubelet,
-pod/default-scheduler-pod         spec.containers{default-scheduler-container}            kubelet,
-pod/fluence-scheduled-pod         fluence,                                                fluence-fluence-787549d4dd-cs22k
-pod/fluence-scheduled-pod         spec.containers{fluence-scheduled-container}            kubelet,
-pod/fluence-scheduled-pod         spec.containers{fluence-scheduled-container}            kubelet,
-pod/fluence-scheduled-pod         spec.containers{fluence-scheduled-container}            kubelet,
+REASON                     OBJECT                                        SUBOBJECT
+pod/default-scheduler-pod  default-scheduler                             Successfully
+pod/default-scheduler-pod  spec.containers{default-scheduler-container}  kubelet,
+pod/default-scheduler-pod  spec.containers{default-scheduler-container}  kubelet,
+pod/default-scheduler-pod  spec.containers{default-scheduler-container}  kubelet,
+pod/default-scheduler-pod  spec.containers{default-scheduler-container}  kubelet,
+pod/fluence-scheduled-pod  fluence,                                      fluence-fluence-6bbcbc6bbf-xjfx6
+pod/fluence-scheduled-pod  spec.containers{fluence-scheduled-container}  kubelet,
+pod/fluence-scheduled-pod  spec.containers{fluence-scheduled-container}  kubelet,
+pod/fluence-scheduled-pod  spec.containers{fluence-scheduled-container}  kubelet,
+...
 ```
 
 There might be a better way to see that? Anyway, really cool! For the above, I found [this page](https://kubernetes.io/docs/tasks/extend-kubernetes/configure-multiple-schedulers/#enable-leader-election) very helpful.
