@@ -1,0 +1,87 @@
+name: fluence build-and deploy
+
+on:
+  pull_request: []
+  release:
+    types: [published]
+  push:
+    branches:
+    - fluence
+
+jobs:
+  build-fluence:
+    permissions:
+      packages: write
+    env:
+      container: ghcr.io/flux-framework/fluence
+    runs-on: ubuntu-latest
+    name: build fluence
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-go@v3
+      with:
+        go-version: ^1.18.1
+
+    - name: Build Container
+      run: |
+        git clone -b fluence https://github.com/openshift-psap/scheduler-plugins ./plugins
+        cd ./plugins
+        make local-image LOCAL_REGISTRY=ghcr.io/flux-framework LOCAL_IMAGE=fluence
+
+    - name: Tag and Push Release Image
+      if: (github.event_name == 'release')
+      run: |
+        tag=${GITHUB_REF#refs/tags/}
+        echo "Tagging and releasing ${{ env.container }}:${tag}"
+        docker tag ${{ env.container }}:latest ${{ env.container }}:${tag}
+        docker push ${{ env.container }}:${tag}
+
+    - name: GHCR Login
+      if: (github.event_name != 'pull_request')
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Deploy Container
+      if: (github.event_name != 'pull_request')
+      run: docker push ${{ env.container }}:latest
+      
+  build-sidecar:
+    permissions:
+      packages: write
+    env:
+      container: ghcr.io/flux-framework/fluence-sidecar
+    runs-on: ubuntu-latest
+    name: build sidecar
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-go@v3
+      with:
+        go-version: ^1.18.1
+
+    - name: Build Container
+      run: |
+        cd scheduler-plugin
+        make LOCAL_REGISTRY=ghcr.io/flux-framework
+
+    - name: Tag and Push Release Image
+      if: (github.event_name == 'release')
+      run: |
+        tag=${GITHUB_REF#refs/tags/}
+        echo "Tagging and releasing ${{ env.container }}:${tag}"
+        docker tag ${{ env.container }}:latest ${{ env.container }}:${tag}
+        docker push ${{ env.container }}:${tag}
+
+    - name: GHCR Login
+      if: (github.event_name != 'pull_request')
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Deploy Container
+      if: (github.event_name != 'pull_request')
+      run: docker push ${{ env.container }}:latest
