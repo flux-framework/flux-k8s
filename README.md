@@ -9,8 +9,28 @@ Fluence enables HPC-grade pod scheduling in Kubernetes via the [Kubernetes Sched
 ## Getting started
 
 For instructions on how to start Fluence on a K8s cluster, see [examples](examples/). Documentation and instructions for reproducing our CANOPIE2022 paper (citation below) can be found in the [canopie22-artifacts branch](https://github.com/flux-framework/flux-k8s/tree/canopie22-artifacts).
+For background on the Flux framework and the Fluxion scheduler, you can take a look at our award-winning R&D100 submission: https://ipo.llnl.gov/sites/default/files/2022-02/Flux_RD100_Final.pdf. For next steps:
 
-For background on the Flux framework and the Fluxion scheduler, you can take a look at our award-winning R&D100 submission: https://ipo.llnl.gov/sites/default/files/2022-02/Flux_RD100_Final.pdf
+ - To deploy our pre-built images, go to [Deploy](#deploy)
+ - To build your own images, go to [Setup](#setup)
+
+### Deploy
+
+We provide a set of pre-build containers [alongside the repository](https://github.com/orgs/flux-framework/packages?repo_name=flux-k8s)
+that you can easily use to deploy Fluence right away! You'll simply need to clone the proper helm charts, and then install to your cluster.
+Here are the quick install steps:
+
+```bash
+$ git clone https://github.com/openshift-psap/scheduler-plugins.git -b fluence
+$ cd scheduler-plugins/manifests/install/charts
+$ helm install \
+  --set scheduler.image=ghcr.io/flux-framework/fluence:latest \
+  --set scheduler.sidecarimage=ghcr.io/flux-framework/fluence-sidecar \
+    schedscheduler-plugins as-a-second-scheduler/
+```
+
+And that's it! See the [testing install](#testing-install) section for a basic example
+to schedule pods using Fluence.
 
 ### Setup
 
@@ -155,6 +175,8 @@ $ helm install \
   --set scheduler.sidecarimage=vanessa/fluence-sidecar \
     schedscheduler-plugins as-a-second-scheduler/
 ```
+
+### Testing Install
 
 The installation process will run one scheduler and one controller pod for the Scheduler Plugin Framework in the default namespace.
 You can double check that everything is running as follows:
