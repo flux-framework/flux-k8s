@@ -6,7 +6,7 @@ on:
     types: [published]
   push:
     branches:
-    - fluence
+    - main
 
 jobs:
   build-fluence:
