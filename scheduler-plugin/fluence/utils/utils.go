@@ -236,7 +236,7 @@ func ParseAllocResult(allocated string) []allocation{
 }
 
 ////// Utility functions
-func PrintOutput(reserved bool, allocated string, at int64, overhead float64, jobid uint64, fluxerr int) {
+func PrintOutput(reserved bool, allocated string, at int64, overhead float64, jobid uint64, err error) {
 	fmt.Println("\n\t----Match Allocate output---")
-	fmt.Printf("jobid: %d\nreserved: %t\nallocated: %s\nat: %d\noverhead: %f\nerror: %d\n", jobid, reserved, allocated, at, overhead, fluxerr)
+	fmt.Printf("jobid: %d\nreserved: %t\nallocated: %s\nat: %d\noverhead: %f\nerror: %s\n", jobid, reserved, allocated, at, overhead, err)
 }

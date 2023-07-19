@@ -51,7 +51,7 @@ We will be adding more notes about how these containers work together.
 
 #### Build Sidecar
 
-To build the plugin containers, cd into [scheduler-plugins](./scheduler-plugins) and run `make`:
+To build the plugin containers, cd into [scheduler-plugin](./scheduler-plugin) and run `make`:
 
 ```bash
 cd scheduler-plugin

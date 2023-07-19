@@ -87,7 +87,7 @@ ENV PATH "/home/flux-install/bin:$PATH"
 ENV LD_LIBRARY_PATH "/home/flux-install/lib/flux:/home/flux-install/lib"
 RUN flux keygen
 
-RUN git clone https://github.com/cmisale/flux-sched.git --branch golang-pr --single-branch && \ 
+RUN git clone -b updates-to-golang-pr https://github.com/researchapps/flux-sched.git --single-branch && \ 
     cd /home/flux-sched/ \
 	&& ./autogen.sh && PYTHON_VERSION=3.8 ./configure --prefix=/home/flux-install && make && make install
 RUN	cd /home/flux-sched && \
