@@ -9,7 +9,6 @@ import (
 	"github.com/researchapps/flux-sched/resource/reapi/bindings/go/src/fluxcli"
 
 	"context"
-	"errors"
 	"fmt"
 	"io/ioutil"
 )
@@ -57,7 +56,8 @@ func (s *Fluxion) Cancel(ctx context.Context, in *pb.CancelRequest) (*pb.CancelR
 		return nil, err
 	}
 
-	dr := &pb.CancelResponse{JobID: in.JobID, Error: err}
+	// If we get here and err is nil, we know there is none (and code is 0)
+	dr := &pb.CancelResponse{JobID: in.JobID, Error: 0}
 	fmt.Printf("[GRPCServer] Sending Cancel response %v\n", dr)
 
 	fmt.Printf("[CancelRPC] Errors so far: %s\n", fluxcli.ReapiCliGetErrMsg(s.fctx))
@@ -77,7 +77,7 @@ func (s *Fluxion) Match(ctx context.Context, in *pb.MatchRequest) (*pb.MatchResp
 
 	spec, err := ioutil.ReadFile(filename)
 	if err != nil {
-		return nil, errors.New("Error reading jobspec")
+		return nil, fmt.Errorf("error reading jobspec: %s", err)
 	}
 
 	fmt.Printf("[GRPCServer] Received Match request %v\n", in)

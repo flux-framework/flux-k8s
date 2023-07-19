@@ -353,7 +353,7 @@ type CancelResponse struct {
 	unknownFields protoimpl.UnknownFields
 
 	JobID int64 `protobuf:"varint,1,opt,name=jobID,proto3" json:"jobID,omitempty"`
-	Error error `protobuf:"varint,2,opt,name=error,proto3" json:"error,omitempty"`
+	Error int32 `protobuf:"varint,2,opt,name=error,proto3" json:"error,omitempty"`
 }
 
 func (x *CancelResponse) Reset() {
@@ -395,11 +395,11 @@ func (x *CancelResponse) GetJobID() int64 {
 	return 0
 }
 
-func (x *CancelResponse) GetError() error {
+func (x *CancelResponse) GetError() int32 {
 	if x != nil {
 		return x.Error
 	}
-	return nil
+	return 0
 }
 
 // The Nodes/Cluster Update Status

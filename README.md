@@ -21,7 +21,7 @@ that you can easily use to deploy Fluence right away! You'll simply need to clon
 Here are the quick install steps:
 
 ```bash
-$ git clone https://github.com/openshift-psap/scheduler-plugins.git -b fluence
+$ git clone -b fluence https://github.com/openshift-psap/scheduler-plugins.git
 $ cd scheduler-plugins/manifests/install/charts
 $ helm install \
   --set scheduler.image=ghcr.io/flux-framework/fluence:latest \
@@ -112,16 +112,16 @@ $ kind create cluster
 
 For some background, the [Scheduling Framework](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/) provided by
 Kubernetes means that our container is going to provide specific endpoints to allow for custom scheduling.
-To make it possible to use our own plugin, we need to install our fork of [kubernetes-sigs/scheduler-plugins](https://github.com/kubernetes-sigs/scheduler-plugins) at [openshift-psap/scheduler-plugins](https://github.com/openshift-psap/scheduler-plugins.git) which will be done through Helm charts. We will be customizing the values.yaml file to point to our image. First, clone the repository:
+To make it possible to use our own plugin, we need to install our fork of [kubernetes-sigs/scheduler-plugins](https://github.com/kubernetes-sigs/scheduler-plugins) at [openshift-psap/scheduler-plugins](https://github.com/openshift-psap/scheduler-plugins.git) which will be done through Helm charts. We will be customizing the values.yaml file to point to our image. First, clone the repository (note you might have cloned this already if you built the image yourself!):
 
 ```bash
-$ git clone https://github.com/openshift-psap/scheduler-plugins.git -b fluence
+$ git clone -b fluence https://github.com/openshift-psap/scheduler-plugins ./plugins
 ```
 
 Install the charts, using the images you just built:
 
 ```bash
-$ cd scheduler-plugins/manifests/install/charts
+$ cd plugins/manifests/install/charts
 ```
 
 Here is how to see values allowed. Note the name of the directory - "as-a-second-scheduler" - this is what we are going to be doing - installing
@@ -173,7 +173,7 @@ So we are good installing the defaults.
 $ helm install \
   --set scheduler.image=vanessa/fluence:latest \
   --set scheduler.sidecarimage=vanessa/fluence-sidecar \
-    schedscheduler-plugins as-a-second-scheduler/
+    scheduler-plugins as-a-second-scheduler/
 ```
 
 ### Testing Install
