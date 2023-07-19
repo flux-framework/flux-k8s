@@ -1,12 +1,12 @@
 package fluxion
 
 import (
-	
+
 	// TODO THIS NEEDS TO BE UPDATED WITH flux-framework when merged
-	"github.com/researchapps/flux-sched/resource/reapi/bindings/go/src/fluxcli"
-	"github.com/flux-framework/flux-k8s/flux-plugin/fluence/utils" 
-	"github.com/flux-framework/flux-k8s/flux-plugin/fluence/jobspec"
 	pb "github.com/flux-framework/flux-k8s/flux-plugin/fluence/fluxcli-grpc"
+	"github.com/flux-framework/flux-k8s/flux-plugin/fluence/jobspec"
+	"github.com/flux-framework/flux-k8s/flux-plugin/fluence/utils"
+	"github.com/researchapps/flux-sched/resource/reapi/bindings/go/src/fluxcli"
 
 	"context"
 	"errors"
@@ -15,7 +15,7 @@ import (
 )
 
 type Fluxion struct {
-	fctx 		*fluxcli.ReapiCtx
+	fctx *fluxcli.ReapiCtx
 	pb.UnimplementedFluxcliServiceServer
 }
 
@@ -33,19 +33,19 @@ func (f *Fluxion) InitFluxion(policy *string, label *string) {
 	if err != nil {
 		return
 	}
-	
+
 	jgf, err := ioutil.ReadFile(filename)
 	if err != nil {
 		fmt.Println("Error reading JGF")
 		return
 	}
-	
+
 	p := "{}"
 	if *policy != "" {
 		p = string("{\"matcher_policy\": \"" + *policy + "\"}")
 		fmt.Println("Match policy: ", p)
-	} 
-	
+	}
+
 	fluxcli.ReapiCliInit(f.fctx, string(jgf), p)
 
 }
@@ -94,12 +94,12 @@ func (s *Fluxion) Match(ctx context.Context, in *pb.MatchRequest) (*pb.MatchResp
 	}
 
 	nodetasks := utils.ParseAllocResult(allocated)
-	
+
 	nodetaskslist := make([]*pb.NodeAlloc, len(nodetasks))
 	for i, result := range nodetasks {
-		nodetaskslist[i] = &pb.NodeAlloc {
+		nodetaskslist[i] = &pb.NodeAlloc{
 			NodeID: result.Basename,
-			Tasks: int32(result.CoreCount)/in.Ps.Cpu,
+			Tasks:  int32(result.CoreCount) / in.Ps.Cpu,
 		}
 	}
 	mr := &pb.MatchResponse{PodID: in.Ps.Id, Nodelist: nodetaskslist, JobID: int64(jobid)}

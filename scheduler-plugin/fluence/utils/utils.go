@@ -4,17 +4,16 @@ import (
 	"context"
 	"fmt"
 	// "strings"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	corev1 "k8s.io/api/core/v1"
-	"github.com/flux-framework/flux-k8s/flux-plugin/fluence/jgf"
 	"encoding/json"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/apimachinery/pkg/fields"
-	resourcehelper "k8s.io/kubectl/pkg/util/resource"
+	"github.com/flux-framework/flux-k8s/flux-plugin/fluence/jgf"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	resourcehelper "k8s.io/kubectl/pkg/util/resource"
 )
-
 
 func CreateJGF(filename string, label *string) error {
 	ctx := context.Background()
@@ -30,7 +29,7 @@ func CreateJGF(filename string, label *string) error {
 		return err
 	}
 	nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-	
+
 	var fluxgraph jgf.Fluxjgf
 	fluxgraph = jgf.InitJGF()
 	// subnets := make(map[string]string)
@@ -53,11 +52,11 @@ func CreateJGF(filename string, label *string) error {
 		if *label != "" {
 			_, fluxnode := node.Labels[*label]
 			if !fluxnode {
-				fmt.Println("Skipping node ",  node.GetName())
+				fmt.Println("Skipping node ", node.GetName())
 				continue
 			}
-		} 
-			
+		}
+
 		fmt.Println("node in flux group ", node.GetName())
 		if !node.Spec.Unschedulable {
 			fieldselector, err := fields.ParseSelector("spec.nodeName=" + node.GetName() + ",status.phase!=" + string(corev1.PodSucceeded) + ",status.phase!=" + string(corev1.PodFailed))
@@ -75,24 +74,22 @@ func CreateJGF(filename string, label *string) error {
 			// Here we build subnets according to topology.kubernetes.io/zone label
 			subnetName := node.Labels["topology.kubernetes.io/zone"]
 			subnet := fluxgraph.MakeSubnet(sdnCount, subnetName)
-			sdnCount = sdnCount+1
+			sdnCount = sdnCount + 1
 			fluxgraph.MakeEdge(cluster, subnet, "contains")
 			fluxgraph.MakeEdge(subnet, cluster, "in")
-	
-		
+
 			reqs := computeTotalRequests(pods)
 			cpuReqs := reqs[corev1.ResourceCPU]
 			memReqs := reqs[corev1.ResourceMemory]
-			
+
 			avail := node.Status.Allocatable.Cpu().MilliValue()
-			totalcpu := int64((avail-cpuReqs.MilliValue())/1000) //- 1
+			totalcpu := int64((avail - cpuReqs.MilliValue()) / 1000) //- 1
 			fmt.Println("Node ", node.GetName(), " flux cpu ", totalcpu)
-			totalAllocCpu = totalAllocCpu+totalcpu
+			totalAllocCpu = totalAllocCpu + totalcpu
 			totalmem = node.Status.Allocatable.Memory().Value() - memReqs.Value()
 			fmt.Println("Node ", node.GetName(), " total mem ", totalmem)
 			gpuAllocatable, hasGpuAllocatable := node.Status.Allocatable["nvidia.com/gpu"]
 
-			
 			// reslist := node.Status.Allocatable
 			// resources := make([]corev1.ResourceName, 0, len(reslist))
 			// for resource := range reslist {
@@ -101,28 +98,27 @@ func CreateJGF(filename string, label *string) error {
 			// }
 			// for _, resource := range resources {
 			// 	value := reslist[resource]
-				
+
 			// 	fmt.Printf(" %s:\t%s\n", resource, value.String())
 			// }
 
-
 			workernode := fluxgraph.MakeNode(node_index, false, node.Name)
 			fluxgraph.MakeEdge(subnet, workernode, "contains") // this is rack otherwise
-			fluxgraph.MakeEdge(workernode, subnet, "in") // this is rack otherwise
+			fluxgraph.MakeEdge(workernode, subnet, "in")       // this is rack otherwise
 
 			// socket := fluxgraph.MakeSocket(0, "socket")
 			// fluxgraph.MakeEdge(workernode, socket, "contains")
 			// fluxgraph.MakeEdge(socket, workernode, "in")
-			
+
 			if hasGpuAllocatable {
 				fmt.Println("GPU Resource quantity ", gpuAllocatable.Value())
 				//MakeGPU(index int, name string, size int) string {
-				for index :=0; index < int(gpuAllocatable.Value()); index++ {
+				for index := 0; index < int(gpuAllocatable.Value()); index++ {
 					gpu := fluxgraph.MakeGPU(index, "nvidiagpu", 1)
 					fluxgraph.MakeEdge(workernode, gpu, "contains") // workernode was socket
 					fluxgraph.MakeEdge(gpu, workernode, "in")
 				}
-				
+
 			}
 
 			for index := 0; index < int(totalcpu); index++ {
@@ -145,7 +141,7 @@ func CreateJGF(filename string, label *string) error {
 			fractionmem := totalmem >> 30
 			// fractionmem := (totalmem/totalcpu) >> 20
 			// fmt.Println("Creating ", fractionmem, " vertices with ", 1<<10, " MB of mem")
-			for i:=0; i < /*int(totalcpu)*/int(fractionmem); i++ {
+			for i := 0; i < /*int(totalcpu)*/ int(fractionmem); i++ {
 				mem := fluxgraph.MakeMemory(i, "memory", "MB", int(1<<10))
 				fluxgraph.MakeEdge(workernode, mem, "contains")
 				fluxgraph.MakeEdge(mem, workernode, "in")
@@ -185,32 +181,31 @@ func computeTotalRequests(podList *corev1.PodList) (total map[corev1.ResourceNam
 	return
 }
 
-
 type allocation struct {
-	Type 		string
-	Name 		string
-	Basename 	string
-	CoreCount	int
+	Type      string
+	Name      string
+	Basename  string
+	CoreCount int
 }
 
-func ParseAllocResult(allocated string) []allocation{
+func ParseAllocResult(allocated string) []allocation {
 	var dat map[string]interface{}
 	result := make([]allocation, 0)
 	corecount := 0
 	if err := json.Unmarshal([]byte(allocated), &dat); err != nil {
-        panic(err)
-    }
+		panic(err)
+	}
 	// fmt.Println("PRINTING DATA:\n", dat)
 	// graph := dat["graph"]
 	// fmt.Println("GET GRAPH:\n ", graph)
 	nodes := dat["graph"].(interface{})
-	str1 := nodes.(map[string]interface {})
-    // fmt.Println("GET NODES:\n", str1["nodes"])
-	str2 := str1["nodes"].([]interface {})
+	str1 := nodes.(map[string]interface{})
+	// fmt.Println("GET NODES:\n", str1["nodes"])
+	str2 := str1["nodes"].([]interface{})
 	// fmt.Println("NODES:\n", len(str2))
 	for _, item := range str2 {
 		// fmt.Println("ITEM: ", item)
-		str1 = item.(map[string]interface {})
+		str1 = item.(map[string]interface{})
 		metadata := str1["metadata"].(map[string]interface{})
 		// fmt.Println("TYPE: ", metadata["type"])
 		if metadata["type"].(string) == "core" {
@@ -219,10 +214,10 @@ func ParseAllocResult(allocated string) []allocation{
 		// fmt.Println("BASENAME: ", metadata["basename"])
 		if metadata["type"].(string) == "node" {
 			result = append(result, allocation{
-				Type : metadata["type"].(string),
-				Name : metadata["name"].(string),
-				Basename : metadata["basename"].(string),
-				CoreCount : corecount,
+				Type:      metadata["type"].(string),
+				Name:      metadata["name"].(string),
+				Basename:  metadata["basename"].(string),
+				CoreCount: corecount,
 			})
 			corecount = 0
 			// result.Type = metadata["type"].(string)
@@ -235,7 +230,7 @@ func ParseAllocResult(allocated string) []allocation{
 	return result
 }
 
-////// Utility functions
+// //// Utility functions
 func PrintOutput(reserved bool, allocated string, at int64, overhead float64, jobid uint64, err error) {
 	fmt.Println("\n\t----Match Allocate output---")
 	fmt.Printf("jobid: %d\nreserved: %t\nallocated: %s\nat: %d\noverhead: %f\nerror: %s\n", jobid, reserved, allocated, at, overhead, err)
