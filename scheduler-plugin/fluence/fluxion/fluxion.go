@@ -65,7 +65,7 @@ func (s *Fluxion) Cancel(ctx context.Context, in *pb.CancelRequest) (*pb.CancelR
 	reserved, at, overhead, mode, err := fluxcli.ReapiCliInfo(s.fctx, int64(in.JobID))
 
 	fmt.Println("\n\t----Job Info output---")
-	fmt.Printf("jobid: %d\nreserved: %t\nat: %d\noverhead: %f\nmode: %s\nerror: %d\n", in.JobID, reserved, at, overhead, mode, err)
+	fmt.Printf("jobid: %d\nreserved: %t\nat: %d\noverhead: %f\nmode: %s\nerror: %v\n", in.JobID, reserved, at, overhead, mode, err)
 
 	fmt.Printf("[GRPCServer] Sending Cancel response %v\n", dr)
 	return dr, err
@@ -77,7 +77,7 @@ func (s *Fluxion) Match(ctx context.Context, in *pb.MatchRequest) (*pb.MatchResp
 
 	spec, err := ioutil.ReadFile(filename)
 	if err != nil {
-		return nil, fmt.Errorf("error reading jobspec: %s", err)
+		return nil, fmt.Errorf("error reading jobspec: %v", err)
 	}
 
 	fmt.Printf("[GRPCServer] Received Match request %v\n", in)
