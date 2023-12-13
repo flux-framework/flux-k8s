@@ -3,7 +3,7 @@ module github.com/flux-framework/flux-k8s/flux-plugin/fluence
 go 1.16
 
 require (
-	github.com/cmisale/flux-sched/resource/hlapi/bindings/go/src/fluxcli v0.0.0-20220921153849-5b631bfccecf
+	github.com/researchapps/flux-sched/resource/reapi/bindings/go/src/fluxcli v0.0.0-20230718234627-be8738c50b63
 	google.golang.org/grpc v1.38.0
 	google.golang.org/protobuf v1.26.0
 	gopkg.in/yaml.v2 v2.4.0
