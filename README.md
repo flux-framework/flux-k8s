@@ -21,7 +21,7 @@ that you can easily use to deploy Fluence right away! You'll simply need to clon
 Here are the quick install steps:
 
 ```bash
-$ git clone https://github.com/openshift-psap/scheduler-plugins.git -b fluence
+$ git clone https://github.com/researchapps/scheduler-plugins.git -b pull-upstream-into-fluence
 $ cd scheduler-plugins/manifests/install/charts
 $ helm install \
   --set scheduler.image=ghcr.io/flux-framework/fluence:latest \
@@ -45,13 +45,13 @@ To build and test Fluence, you will need:
 There are two images we will be building:
 
  - the scheduler sidecar: built from the repository here
- - the scheduler: built from [this branch of scheduler-plugins](https://github.com/openshift-psap/scheduler-plugins/blob/fluence/build/scheduler/Dockerfile)
+ - the scheduler: built from [this branch of scheduler-plugins](https://github.com/researchapps/scheduler-plugins/blob/pull-upstream-into-fluence/build/scheduler/Dockerfile)
 
 We will be adding more notes about how these containers work together.
 
 #### Build Sidecar
 
-To build the plugin containers, cd into [scheduler-plugins](./scheduler-plugins) and run `make`:
+To build the plugin containers, cd into [scheduler-plugin](./scheduler-plugin) and run `make`:
 
 ```bash
 cd scheduler-plugin
@@ -73,20 +73,21 @@ docker push docker.io/vanessa/fluence-sidecar:latest
 
 #### Build Scheduler
 
-First, clone the repository:
+First (if you have not done so yet) clone the repository:
 
 ```bash
-$ git clone -b fluence https://github.com/openshift-psap/scheduler-plugins ./plugins
+$ git clone -b pull-upstream-into-fluence https://github.com/researchapps/scheduler-plugins
+$ cd ./scheduler-plugins
 ```
 
-And build! You'll most likely want to set a custom registry and image name again:
+And build! You can also tweak the names of the resulting image to be for your own registry.
 
 ```bash
 # This will build to localhost
 $ make local-image
 
 # this will build to docker.io/vanessa/fluence
-$ make local-image LOCAL_REGISTRY=vanessa LOCAL_IMAGE=fluence
+$ make local-image REGISTRY=vanessa IMAGE=fluence:latest
 ```
 
 **Important** the make command above produces _two images_ and you want to use the first that is mentioned in the output (not the second, which is a controller).
@@ -115,7 +116,7 @@ Kubernetes means that our container is going to provide specific endpoints to al
 To make it possible to use our own plugin, we need to install our fork of [kubernetes-sigs/scheduler-plugins](https://github.com/kubernetes-sigs/scheduler-plugins) at [openshift-psap/scheduler-plugins](https://github.com/openshift-psap/scheduler-plugins.git) which will be done through Helm charts. We will be customizing the values.yaml file to point to our image. First, clone the repository:
 
 ```bash
-$ git clone https://github.com/openshift-psap/scheduler-plugins.git -b fluence
+$ git clone https://github.com/researchapps/scheduler-plugins.git -b pull-upstream-into-fluence
 ```
 
 Install the charts, using the images you just built:
@@ -142,9 +143,7 @@ $ helm show values as-a-second-scheduler/
 
 scheduler:
   name: fluence
-  # image: k8s.gcr.io/scheduler-plugins/kube-scheduler:v0.23.10
-  image: quay.io/cmisale1/fluence:upstream
-  namespace: scheduler-plugins
+  image: registry.k8s.io/scheduler-plugins/kube-scheduler:v0.27.8
   replicaCount: 1
   leaderElect: false
   sidecarimage: quay.io/cmisale1/fluence-sidecar:latest
@@ -152,8 +151,7 @@ scheduler:
 
 controller:
   name: scheduler-plugins-controller
-  image: k8s.gcr.io/scheduler-plugins/controller:v0.23.10
-  namespace: scheduler-plugins
+  image: registry.k8s.io/scheduler-plugins/controller:v0.27.8
   replicaCount: 1
 
 # LoadVariationRiskBalancing and TargetLoadPacking are not enabled by default
@@ -162,6 +160,19 @@ controller:
 plugins:
   enabled: ["Fluence"]
   disabled: ["CapacityScheduling","NodeResourceTopologyMatch","NodeResourcesAllocatable","PrioritySort","Coscheduling"] # only in-tree plugins need to be defined here
+
+# Customize the enabled plugins' config.
+# Refer to the "pluginConfig" section of manifests/<plugin>/scheduler-config.yaml.
+# For example, for Coscheduling plugin, you want to customize the permit waiting timeout to 10 seconds:
+pluginConfig:
+- name: Coscheduling
+  args:
+    permitWaitingTimeSeconds: 10 # default is 60
+# Or, customize the other plugins
+# - name: NodeResourceTopologyMatch
+#   args:
+#     scoringStrategy:
+#       type: MostAllocated # default is LeastAllocated
 ```
 
 </details>
@@ -182,7 +193,7 @@ The installation process will run one scheduler and one controller pod for the S
 You can double check that everything is running as follows:
 
 ```bash
-$ kubectl get pods -n scheduler-plugins
+$ kubectl get pods
 ```
 ```console
 NAME                                            READY   STATUS    RESTARTS   AGE
@@ -195,7 +206,7 @@ Let's now check logs for containers to check that everything is OK.
 First, let's look at logs for the sidecar container:
 
 ```bash
-$ kubectl logs -n scheduler-plugins fluence-6bbcbc6bbf-xjfx6 
+$ kubectl logs fluence-6bbcbc6bbf-xjfx6 
 ```
 ```console
 Defaulted container "sidecar" out of: sidecar, scheduler-plugins-scheduler
@@ -204,17 +215,17 @@ Created cli context  &{}
 &{}
 Number nodes  1
 node in flux group  kind-control-plane
-Node  kind-control-plane  flux cpu  6
-Node  kind-control-plane  total mem  16132255744
-Can request at most  6  exclusive cpu
+Node  kind-control-plane  flux cpu  10
+Node  kind-control-plane  total mem  32988807168
+Can request at most  10  exclusive cpu
 Match policy:  {"matcher_policy": "lonode"}
 [GRPCServer] gRPC Listening on [::]:4242
 ```
 
-And for the fluence container:
+And for the scheduler plugins scheduler container:
 
 ```bash
-$ kubectl logs -n scheduler-plugins fluence-6bbcbc6bbf-xjfx6 -c scheduler-plugins-scheduler
+$ kubectl logs fluence-6bbcbc6bbf-xjfx6 -c scheduler-plugins-scheduler
 ```
 
 If you haven't done anything, you'll likely just see health checks.
@@ -245,7 +256,7 @@ $ kubectl apply -f fluence-scheduler-pod.yaml
 Once it was created, aside from checking that it ran OK, I could verify by looking at the scheduler logs again:
 
 ```bash
-$ kubectl logs -n scheduler-plugins fluence-6bbcbc6bbf-xjfx6
+$ kubectl logs fluence-6bbcbc6bbf-xjfx6
 ```
 ```bash
 Defaulted container "sidecar" out of: sidecar, scheduler-plugins-scheduler
@@ -254,9 +265,9 @@ Created cli context  &{}
 &{}
 Number nodes  1
 node in flux group  kind-control-plane
-Node  kind-control-plane  flux cpu  6
-Node  kind-control-plane  total mem  16132255744
-Can request at most  6  exclusive cpu
+Node  kind-control-plane  flux cpu  10
+Node  kind-control-plane  total mem  32988807168
+Can request at most  10  exclusive cpu
 Match policy:  {"matcher_policy": "lonode"}
 [GRPCServer] gRPC Listening on [::]:4242
 Labels  []   0
@@ -279,7 +290,7 @@ tasks:
   count:
     per_slot: 1
 
-[GRPCServer] Received Match request ps:{id:"fluence-scheduled-pod" cpu:1} request:"allocate" count:1
+[GRPCServer] Received Match request ps:{id:"fluence-scheduled-pod"  cpu:1}  request:"allocate"  count:1
 
 	----Match Allocate output---
 jobid: 1
@@ -287,12 +298,12 @@ reserved: false
 allocated: {"graph": {"nodes": [{"id": "3", "metadata": {"type": "core", "basename": "core", "name": "core0", "id": 0, "uniq_id": 3, "rank": -1, "exclusive": true, "unit": "", "size": 1, "paths": {"containment": "/k8scluster0/1/kind-control-plane2/core0"}}}, {"id": "2", "metadata": {"type": "node", "basename": "kind-control-plane", "name": "kind-control-plane2", "id": 2, "uniq_id": 2, "rank": -1, "exclusive": false, "unit": "", "size": 1, "paths": {"containment": "/k8scluster0/1/kind-control-plane2"}}}, {"id": "1", "metadata": {"type": "subnet", "basename": "", "name": "1", "id": 0, "uniq_id": 1, "rank": -1, "exclusive": false, "unit": "", "size": 1, "paths": {"containment": "/k8scluster0/1"}}}, {"id": "0", "metadata": {"type": "cluster", "basename": "k8scluster", "name": "k8scluster0", "id": 0, "uniq_id": 0, "rank": -1, "exclusive": false, "unit": "", "size": 1, "paths": {"containment": "/k8scluster0"}}}], "edges": [{"source": "2", "target": "3", "metadata": {"name": {"containment": "contains"}}}, {"source": "1", "target": "2", "metadata": {"name": {"containment": "contains"}}}, {"source": "0", "target": "1", "metadata": {"name": {"containment": "contains"}}}]}}
 
 at: 0
-overhead: 0.000549
+overhead: 0.000471
 error: 0
 [MatchRPC] Errors so far: 
 FINAL NODE RESULT:
  [{node kind-control-plane2 kind-control-plane 1}]
-[GRPCServer] Response podID:"fluence-scheduled-pod" nodelist:{nodeID:"kind-control-plane" tasks:1} jobID:1 
+[GRPCServer] Response podID:"fluence-scheduled-pod"  nodelist:{nodeID:"kind-control-plane"  tasks:1}  jobID:1 
 ```
 
 I was trying to look for a way to see the assignment, and maybe we can see it here (this is the best I could come up with!)
