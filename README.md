@@ -21,7 +21,11 @@ that you can easily use to deploy Fluence right away! You'll simply need to clon
 Here are the quick install steps:
 
 ```bash
-$ git clone https://github.com/openshift-psap/scheduler-plugins.git -b fluence
+# This clones the upstream scheduler plugins code, we will add fluence to it!
+$ git clone --depth 1  https://github.com/kubernetes-sigs/scheduler-plugins.git upstream
+
+# Add fluence assets
+cp -R 
 $ cd scheduler-plugins/manifests/install/charts
 $ helm install \
   --set scheduler.image=ghcr.io/flux-framework/fluence:latest \
