@@ -22,11 +22,11 @@ We provide helper commands to do that.
 
 ```bash
 # This clones the upstream scheduler plugins code, we will add fluence to it!
-$ make prepare
+make prepare
 
 # Add fluence assets
-$ cd upstream/manifests/install/charts
-$ helm install \
+cd upstream/manifests/install/charts
+helm install \
   --set scheduler.image=ghcr.io/flux-framework/fluence:latest \
   --set scheduler.sidecarimage=ghcr.io/flux-framework/fluence-sidecar \
     schedscheduler-plugins as-a-second-scheduler/
@@ -138,7 +138,7 @@ make build REGISTRY=vanessa CONTROLLER_IMAGE=fluence-controller SCHEDULER_IMAGE=
 To walk through it manually, first, clone the upstream scheduler-plugins repository:
 
 ```bash
-$ git clone https://github.com/kubernetes-sigs/scheduler-plugins ./upstream
+git clone https://github.com/kubernetes-sigs/scheduler-plugins ./upstream
 ```
 
 We need to add our fluence package to the scheduler plugins to build. You can do that manully as follows:
@@ -151,7 +151,7 @@ cp -R sig-scheduler-plugins/manifests/fluence ./upstream/manifests/fluence
 # These are files with subtle changes to add fluence
 cp sig-scheduler-plugins/cmd/scheduler/main.go ./upstream/cmd/scheduler/main.go
 cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/templates/deployment.yaml ./upstream/manifests/install/charts/as-a-second-scheduler/templates/deployment.yaml
-cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/templates/values.yaml ./upstream/manifests/install/charts/as-a-second-scheduler/templates/values.yaml
+cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/values.yaml ./upstream/manifests/install/charts/as-a-second-scheduler/values.yaml
 ```
 
 Then change directory to the scheduler plugins repository. 
@@ -164,10 +164,10 @@ And build! You'll most likely want to set a custom registry and image name again
 
 ```bash
 # This will build to localhost
-$ make local-image
+make local-image
 
 # this will build to docker.io/vanessa/fluence
-$ make local-image REGISTRY=vanessa CONTROLLER_IMAGE=fluence
+make local-image REGISTRY=vanessa CONTROLLER_IMAGE=fluence
 ```
 
 </details>
@@ -177,7 +177,7 @@ $ make local-image REGISTRY=vanessa CONTROLLER_IMAGE=fluence
 Whatever build approach you use, you'll want to push to your registry for later discovery!
 
 ```bash
-$ docker push docker.io/vanessa/fluence
+docker push docker.io/vanessa/fluence
 ```
 
 ### Prepare Cluster
@@ -188,7 +188,7 @@ These steps will require a Kubernetes cluster to install to, and having pushed t
 create a local one with `kind`:
 
 ```bash
-$ kind create cluster
+kind create cluster
 ```
 
 ### Install Fluence
@@ -199,14 +199,14 @@ under [deploy](#deploy) to ensure you have cloned the upstream kubernetes-sigs/s
 more details to inspect attributes available to you. Let's say that you ran
 
 ```bash
-$ make prepare
+make prepare
 ```
 
 You could then inspect values with helm:
 
 ```bash
-$ cd upstream/manifests/install/charts
-$ helm show values as-a-second-scheduler/
+cd upstream/manifests/install/charts
+helm show values as-a-second-scheduler/
 ```
 
 <details>
@@ -249,8 +249,8 @@ The `helm install` shown under [deploy](#deploy) is how you can install to your 
 Here would be an example using custom images:
 
 ```bash
-$ cd upstream/manifests/install/charts
-$ helm install \
+cd upstream/manifests/install/charts
+helm install \
   --set scheduler.image=vanessa/fluence:latest \
   --set scheduler.sidecarimage=vanessa/fluence-sidecar \
     schedscheduler-plugins as-a-second-scheduler/
@@ -264,7 +264,7 @@ The installation process will run one scheduler and one controller pod for the S
 You can double check that everything is running as follows:
 
 ```bash
-$ kubectl get pods
+kubectl get pods
 ```
 ```console
 NAME                                            READY   STATUS    RESTARTS   AGE
@@ -277,18 +277,18 @@ Let's now check logs for containers to check that everything is OK.
 First, let's look at logs for the sidecar container:
 
 ```bash
-$ kubectl logs fluence-6bbcbc6bbf-xjfx6 
+kubectl logs fluence-6bbcbc6bbf-xjfx6 
 ```
 ```console
 Defaulted container "sidecar" out of: sidecar, scheduler-plugins-scheduler
 This is the fluxion grpc server
-Created cli context  &{}
-&{}
+Created flux resource client  &{0x3bd33d0}
+&{ctx:0x3bd33d0}
 Number nodes  1
 node in flux group  kind-control-plane
-Node  kind-control-plane  flux cpu  6
-Node  kind-control-plane  total mem  16132255744
-Can request at most  6  exclusive cpu
+Node  kind-control-plane  flux cpu  10
+Node  kind-control-plane  total mem  32992821248
+Can request at most  10  exclusive cpu
 Match policy:  {"matcher_policy": "lonode"}
 [GRPCServer] gRPC Listening on [::]:4242
 ```
@@ -296,7 +296,7 @@ Match policy:  {"matcher_policy": "lonode"}
 And for the fluence container:
 
 ```bash
-$ kubectl logs fluence-6bbcbc6bbf-xjfx6 -c scheduler-plugins-scheduler
+kubectl logs fluence-6bbcbc6bbf-xjfx6 -c scheduler-plugins-scheduler
 ```
 
 If you haven't done anything, you'll likely just see health checks.

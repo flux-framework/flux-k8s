@@ -23,7 +23,9 @@ jobs:
         go-version: ^1.19
 
     - name: Build Containers
-      run: make build REGISTRY=ghcr.io/flux-framework SCHEDULER_IMAGE=fluence
+      run: |
+        make prepare
+        make build REGISTRY=ghcr.io/flux-framework SCHEDULER_IMAGE=fluence
 
     - name: Tag Release Image
       if: (github.event_name == 'release')
@@ -58,7 +60,9 @@ jobs:
         go-version: ^1.19
 
     - name: Build Container
-      run: make build-sidecar REGISTRY=ghcr.io/flux-framework SIDECAR_IMAGE=fluence-sidecar
+      run: |
+        make prepare
+        make build-sidecar REGISTRY=ghcr.io/flux-framework SIDECAR_IMAGE=fluence-sidecar
 
     - name: Tag Release Image
       if: (github.event_name == 'release')

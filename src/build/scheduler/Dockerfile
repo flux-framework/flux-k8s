@@ -128,7 +128,10 @@ RUN apt -y update && apt -y upgrade && apt install --no-install-recommends -y pr
 ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/usr/lib:/home/flux-sched/resource:/home/flux-sched/resource/libjobspec:/home/flux-sched/resource/reapi/bindings"
 COPY fluence Makefile /go/src/fluence/
 WORKDIR /go/src/fluence/
-RUN go mod tidy && \
+
+# This is the 0.31.0 tag of flux-sched (same as we install above)
+RUN go get -u github.com/flux-framework/flux-sched/resource/reapi/bindings/go/src/fluxcli@250eac78a6753253fc8353a3504d7e843d1b6b24 && \
+    go mod tidy && \
     make server FLUX_SCHED_ROOT=/home/flux-sched INSTALL_PREFIX=${INSTALL_PREFIX} && \
     mkdir -p /home/data/jobspecs /home/data/jgf && \
     chmod -R ugo+rwx /home/data
