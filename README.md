@@ -277,7 +277,7 @@ Let's now check logs for containers to check that everything is OK.
 First, let's look at logs for the sidecar container:
 
 ```bash
-$ kubectl logs -n scheduler-plugins fluence-6bbcbc6bbf-xjfx6 
+$ kubectl logs fluence-6bbcbc6bbf-xjfx6 
 ```
 ```console
 Defaulted container "sidecar" out of: sidecar, scheduler-plugins-scheduler
@@ -296,7 +296,7 @@ Match policy:  {"matcher_policy": "lonode"}
 And for the fluence container:
 
 ```bash
-$ kubectl logs -n scheduler-plugins fluence-6bbcbc6bbf-xjfx6 -c scheduler-plugins-scheduler
+$ kubectl logs fluence-6bbcbc6bbf-xjfx6 -c scheduler-plugins-scheduler
 ```
 
 If you haven't done anything, you'll likely just see health checks.
@@ -306,7 +306,8 @@ If you haven't done anything, you'll likely just see health checks.
 Let's now run a simple example! Change directory into this directory:
 
 ```bash
-cd ../../../../examples/simple_example
+# This is from the root of flux-k8s
+cd examples/simple_example
 ```
 
 And then we want to deploy two pods, one assigned to the `default-scheduler` and the other
@@ -320,14 +321,14 @@ spec:
 Here is how to create the pods:
 
 ```bash
-$ kubectl apply -f default-scheduler-pod.yaml
-$ kubectl apply -f fluence-scheduler-pod.yaml
+kubectl apply -f default-scheduler-pod.yaml
+kubectl apply -f fluence-scheduler-pod.yaml
 ```
 
 Once it was created, aside from checking that it ran OK, I could verify by looking at the scheduler logs again:
 
 ```bash
-$ kubectl logs -n scheduler-plugins fluence-6bbcbc6bbf-xjfx6
+kubectl logs fluence-6bbcbc6bbf-xjfx6
 ```
 ```bash
 Defaulted container "sidecar" out of: sidecar, scheduler-plugins-scheduler
@@ -380,10 +381,12 @@ FINAL NODE RESULT:
 I was trying to look for a way to see the assignment, and maybe we can see it here (this is the best I could come up with!)
 
 ```bash
-$ kubectl get events -o wide
+kubectl get events -o wide
+```
+```bash
+kubectl get events -o wide |  awk {'print $4" " $5" " $6'} | column -t
 ```
 ```console
-$ kubectl get events -o wide |  awk {'print $4" " $5" " $6'} | column -t
 REASON                     OBJECT                                        SUBOBJECT
 pod/default-scheduler-pod  default-scheduler                             Successfully
 pod/default-scheduler-pod  spec.containers{default-scheduler-container}  kubelet,
