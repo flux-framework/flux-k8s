@@ -1,24 +1,27 @@
-FROM ubuntu:latest as basegoflux
+FROM ubuntu:latest as base
 
 RUN apt -y update && apt -y upgrade && apt -y clean && apt -y autoremove
+ENV DEBIAN_FRONTEND=noninteractive
+ENV GO_VERSION=1.19.10
+ENV INSTALL_PREFIX=/usr
 
-RUN DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends tzdata && apt -y --no-install-recommends install \
-    libc6-dev \
-    wget \
-    systemd \
-    git \
+RUN apt install -y --no-install-recommends tzdata && \
+    apt -y --no-install-recommends install \
+    aspell \
+    aspell-en \
     autoconf \
     automake \
-    libtool \
-    libelf-dev \ 
+    curl \
+    git \    
+    libc6-dev \
+    libczmq-dev \
+    libmpich-dev \
     libncurses5-dev \
+    libelf-dev \ 
     libssl-dev \
-    openssh-client \
-    make \
+    libtool \
     libsodium-dev \
     libzmq3-dev \
-    libczmq-dev \
-    uuid-dev \
     libjansson-dev \
     liblz4-dev \
     libhwloc-dev \
@@ -26,6 +29,8 @@ RUN DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends tzdata
     lua5.1 \
     liblua5.1-dev \
     lua-posix \
+    make \
+    openssh-client \
     python3-dev \
     python3-cffi \
     python3-six \
@@ -34,22 +39,26 @@ RUN DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends tzdata
     python3-sphinx \
     python3-pip \
     python3-setuptools \
-    aspell \
-    aspell-en \
-    libmpich-dev && apt -y clean  && apt -y autoremove
+    systemd \
+    wget \
+    uuid-dev && \
+    apt -y clean  && apt -y autoremove
 
-RUN \
-   echo 'alias python="/usr/bin/python3.8"' >> /root/.bashrc && \
-   echo 'alias pip="/usr/bin/pip3"' >> /root/.bashrc && \
-   . /root/.bashrc
+RUN echo 'alias python="/usr/bin/python3.8"' >> /root/.bashrc && \
+    echo 'alias pip="/usr/bin/pip3"' >> /root/.bashrc && \
+    . /root/.bashrc
 
-RUN \
-   echo 'set number' >> /root/.vimrc 
+RUN echo 'set number' >> /root/.vimrc 
 
-# Remove python2
+# Install cmake for new build system
+RUN curl -s -L https://github.com/Kitware/CMake/releases/download/v3.26.4/cmake-3.26.4-linux-$(uname -m).sh > cmake.sh ;\
+    bash cmake.sh --prefix=/usr/local --skip-license ;\
+    rm cmake.sh
+
+# Remove Python 2
 RUN apt purge -y python2.7-minimal
-# You already have Python3 but
-# don't care about the version
+
+# Python 3 should be linked to python
 RUN ln -s /usr/bin/python3 /usr/bin/python
 RUN apt install -y python3-pip \
     &&  apt -y --no-install-recommends install \
@@ -65,38 +74,41 @@ RUN apt install -y python3-pip \
     libedit-dev \
     libarchive-dev \
     pkg-config && apt -y clean  && apt -y autoremove
-RUN python --version
-RUN cd /home/ && mkdir flux-install
-WORKDIR /home/
-RUN git clone https://github.com/flux-framework/flux-core.git 
 
-RUN cd /home/flux-core/ && ./autogen.sh && PYTHON_VERSION=3 ./configure --prefix=/home/flux-install \ 
-    && make && make install && cd /home && rm -rf /home/flux-core
+RUN git clone https://github.com/flux-framework/flux-core.git /home/flux-core && \
+    cd /home/flux-core/ && \
+    ./autogen.sh && \
+    PYTHON_VERSION=3 ./configure --prefix=${INSTALL_PREFIX} && \ 
+    make && make install && \
+    cd ../ && \
+    rm -rf flux-core
 
-# Install go 19
-WORKDIR /home
-RUN wget https://go.dev/dl/go1.19.10.linux-amd64.tar.gz  && tar -xvf go1.19.10.linux-amd64.tar.gz && \
-         mv go /usr/local && rm go1.19.10.linux-amd64.tar.gz
+# Install go 19.10
+RUN wget https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz  && tar -xvf go${GO_VERSION}.linux-amd64.tar.gz && \
+    mv go /usr/local && rm go${GO_VERSION}.linux-amd64.tar.gz
 
-ENV GOROOT "/usr/local/go"
-ENV GOPATH "/go"
-ENV PATH "$GOROOT/bin:$PATH"
+ENV GOROOT=/usr/local/go
+ENV GOPATH=/go
+ENV PATH="$GOROOT/bin:$PATH"
 RUN mkdir -p /go/src
-
-ENV PATH "/home/flux-install/bin:$PATH"
-ENV LD_LIBRARY_PATH "/home/flux-install/lib/flux:/home/flux-install/lib"
 RUN flux keygen
 
-RUN git clone https://github.com/cmisale/flux-sched.git --branch golang-pr --single-branch && \ 
-    cd /home/flux-sched/ \
-	&& ./autogen.sh && PYTHON_VERSION=3.8 ./configure --prefix=/home/flux-install && make && make install
-RUN	cd /home/flux-sched && \
-    cp -r resource/reapi/bindings/c/.libs/* resource/.libs/* /home/flux-install/lib/ \
-	&& cp -r resource/reapi/bindings/go/src/fluxcli /go/src/ \
-	&& mv  resource/reapi/bindings /tmp \
-	&& cd /home && mkdir -p flux-sched/resource/reapi && mv /tmp/bindings flux-sched/resource/reapi
+ENV WITH_GO=yes
+RUN git clone https://github.com/flux-framework/flux-sched.git /home/flux-sched && \ 
+    cd /home/flux-sched/ && \
+    # Ensure we pin to variant that has STATIC - will update when fix is in
+    git fetch && git checkout v0.31.0 && \
+    # These need to be shared libraries 
+    # https://github.com/flux-framework/flux-sched/pull/1094
+    sed -i 's/add_library(resource STATIC/add_library(resource SHARED/g' resource/CMakeLists.txt && \
+    sed -i 's/add_library ( reapi_module STATIC/add_library ( reapi_module SHARED/g' resource/reapi/bindings/CMakeLists.txt && \
+    sed -i 's/add_library ( reapi_cli STATIC/add_library ( reapi_cli SHARED/g' resource/reapi/bindings/CMakeLists.txt && \
+    sed -i 's/add_library ( jobspec_conv STATIC/add_library ( jobspec_conv SHARED/g' resource/libjobspec/CMakeLists.txt && \
+    PYTHON_VERSION=3 ./configure --prefix=${INSTALL_PREFIX} && \
+    make && make install
 
-RUN apt purge -y git  python3-dev \
+RUN apt purge -y \
+    python3-dev \
     python3-cffi \
     python3-six \
     python3-yaml \
@@ -106,20 +118,17 @@ RUN apt purge -y git  python3-dev \
     python3-setuptools \
     && apt -y clean && apt -y autoremove
 
-# BUILD SHARED LIBRARY
-# RUN cp -r /go/src/fluxcli /usr/local/go/src/
-# WORKDIR /usr/local/go/src/fluxcli
-
-# RUN CGO_CFLAGS="-I/root/flux-sched/resource/hlapi/bindings/c -I/root/flux-install/include" CGO_LDFLAGS="-L/root/flux-install/lib/ -lreapi_cli  -L/root/flux-install/lib/ -lresource -lstdc++ -lczmq -ljansson -lhwloc -lboost_system -L/root/flux-install/lib -lflux-hostlist -lboost_graph -lyaml-cpp" go install -buildmode=shared -linkshared fluxcli
 ENV PATH=/usr/local/go/bin:$PATH
 RUN apt -y update && apt -y upgrade && apt install --no-install-recommends -y protobuf-compiler curl && \
-   go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.26 && \ 
-   go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.1
+    go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.26 && \ 
+    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.1
 
-COPY fluence /go/src/fluence/
-COPY Makefile /go/src/fluence/
+# These need to be on the LD_LIBRARY_PATH for the server to find at runtime
+# This mimcs what we use to build server
+ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/usr/lib:/home/flux-sched/resource:/home/flux-sched/resource/libjobspec:/home/flux-sched/resource/reapi/bindings"
+COPY fluence Makefile /go/src/fluence/
 WORKDIR /go/src/fluence/
-RUN go mod tidy
-RUN make server
-RUN mkdir -p /home/data/jobspecs && mkdir -p /home/data/jgf
-RUN chmod -R ugo+rwx /home/data
+RUN go mod tidy && \
+    make server FLUX_SCHED_ROOT=/home/flux-sched INSTALL_PREFIX=${INSTALL_PREFIX} && \
+    mkdir -p /home/data/jobspecs /home/data/jgf && \
+    chmod -R ugo+rwx /home/data

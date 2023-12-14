@@ -1,5 +1,11 @@
+
+FLUX_SCHED_ROOT ?= /home/flux-sched
+INSTALL_PREFIX ?= /usr
 COMMONENVVAR=GOOS=$(shell uname -s | tr A-Z a-z)
-BUILDENVVAR=CGO_CFLAGS="-I/home/flux-sched/resource/reapi/bindings/c -I/home/flux-install/include" CGO_LDFLAGS="-L/home/flux-install/lib -lreapi_cli  -L/home/flux-install/lib -lresource -L/home/flux-install/lib -lflux-idset -lstdc++ -lczmq -ljansson -lhwloc -lboost_system -L/home/flux-install/lib -lflux-hostlist -lboost_graph -lyaml-cpp"
+
+# This is what worked
+# GOOS=linux CGO_CFLAGS="-I/home/flux-sched/resource/reapi/bindings/c" CGO_LDFLAGS="-L/usr/lib -L/home/flux-sched/resource -lresource -L/home/flux-sched/resource/libjobspec -ljobspec_conv -L/home/flux-sched/resource/reapi/bindings -lreapi_cli -lflux-idset -lstdc++ -lczmq -ljansson -lhwloc -lboost_system -lflux-hostlist -lboost_graph -lyaml-cpp" go build -ldflags '-w' -o bin/server cmd/main.go
+BUILDENVVAR=CGO_CFLAGS="-I${FLUX_SCHED_ROOT}/resource/reapi/bindings/c" CGO_LDFLAGS="-L${INSTALL_PREFIX}/lib -L${FLUX_SCHED_ROOT}/resource -lresource -L${FLUX_SCHED_ROOT}/resource/libjobspec -ljobspec_conv -L/${FLUX_SCHED_ROOT}/resource/reapi/bindings -lreapi_cli -lflux-idset -lstdc++ -lczmq -ljansson -lhwloc -lboost_system -lflux-hostlist -lboost_graph -lyaml-cpp"
 
 LOCAL_REGISTRY=localhost:5000
 LOCAL_IMAGE=fluence-sidecar:latest

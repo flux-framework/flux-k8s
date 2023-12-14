@@ -18,15 +18,14 @@ For background on the Flux framework and the Fluxion scheduler, you can take a l
 
 We provide a set of pre-build containers [alongside the repository](https://github.com/orgs/flux-framework/packages?repo_name=flux-k8s)
 that you can easily use to deploy Fluence right away! You'll simply need to clone the proper helm charts, and then install to your cluster.
-Here are the quick install steps:
+We provide helper commands to do that.
 
 ```bash
 # This clones the upstream scheduler plugins code, we will add fluence to it!
-$ git clone --depth 1  https://github.com/kubernetes-sigs/scheduler-plugins.git upstream
+$ make prepare
 
 # Add fluence assets
-cp -R 
-$ cd scheduler-plugins/manifests/install/charts
+$ cd upstream/manifests/install/charts
 $ helm install \
   --set scheduler.image=ghcr.io/flux-framework/fluence:latest \
   --set scheduler.sidecarimage=ghcr.io/flux-framework/fluence-sidecar \
@@ -51,24 +50,63 @@ There are two images we will be building:
  - the scheduler sidecar: built from the repository here
  - the scheduler: built from [this branch of scheduler-plugins](https://github.com/openshift-psap/scheduler-plugins/blob/fluence/build/scheduler/Dockerfile)
 
-We will be adding more notes about how these containers work together.
+#### All at once (Sidecar + Scheduler)
+
+**recommended**
+
+This will run the full builds for all containers in one step, which includes:
+
+1. Building the fluence sidecar from source code in [src](src)
+2. Cloning the upstream kubernetes-sigs/plugin-schedulers respository to ./upstream
+3. Building the scheduler container
+
+From the root here:
+
+```bash
+make
+```
+
+or customize the naming of your registry or local images:
+
+```bash
+make REGISTRY=vanessa SCHEDULER_IMAGE=fluence SIDECAR_IMAGE=fluence-sidecar
+```
+
+As an alternative, you can do each of the steps separately or manually (detailed below).
+
+<details>
+
+<summary> Manual Build Instructions </summary>
 
 #### Build Sidecar
 
-To build the plugin containers, cd into [scheduler-plugins](./scheduler-plugins) and run `make`:
+To build the plugin containers, we will basically be running `make` from the [src](src) directory. We have wrapped that for you
+in the Makefile:
 
 ```bash
-cd scheduler-plugin
-make
+make build-sidecar
 ```
 
 To build for a custom registry (e.g., "vanessa' on Docker Hub):
 
 ```bash
-make LOCAL_REGISTRY=vanessa
+make build-sidecar REGISTRY=vanessa
 ```
 
-This will create the scheduler plugin main container, which can be tagged and pushed to the preferred registry. As an example,
+And specify the sidecar image name too:
+
+```bash
+make build-sidecar REGISTRY=vanessa SIDECAR_IMAGE=another-sidecar
+```
+
+The equivalent manual command is:
+
+```bash
+cd src
+make
+```
+
+Using either of the approaches above, this will create the scheduler plugin main container, which can be tagged and pushed to the preferred registry. As an example,
 here we push to the result of the build above:
 
 ```bash
@@ -77,10 +115,49 @@ docker push docker.io/vanessa/fluence-sidecar:latest
 
 #### Build Scheduler
 
-First, clone the repository:
+Note that you can run this entire process like:
 
 ```bash
-$ git clone -b fluence https://github.com/openshift-psap/scheduler-plugins ./plugins
+make prepare
+make build
+```
+
+Or customize the name of the scheduler image:
+
+```bash
+make prepare
+make build REGISTRY=vanessa
+```
+
+For a custom scheduler or controller image (we just need the scheduler):
+
+```bash
+make build REGISTRY=vanessa CONTROLLER_IMAGE=fluence-controller SCHEDULER_IMAGE=fluence
+```
+
+To walk through it manually, first, clone the upstream scheduler-plugins repository:
+
+```bash
+$ git clone https://github.com/kubernetes-sigs/scheduler-plugins ./upstream
+```
+
+We need to add our fluence package to the scheduler plugins to build. You can do that manully as follows:
+
+```bash
+# These are entirely new directory structures
+cp -R sig-scheduler-plugins/pkg/fluence ./upstream/pkg/fluence
+cp -R sig-scheduler-plugins/manifests/fluence ./upstream/manifests/fluence
+
+# These are files with subtle changes to add fluence
+cp sig-scheduler-plugins/cmd/scheduler/main.go ./upstream/cmd/scheduler/main.go
+cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/templates/deployment.yaml ./upstream/manifests/install/charts/as-a-second-scheduler/templates/deployment.yaml
+cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/templates/values.yaml ./upstream/manifests/install/charts/as-a-second-scheduler/templates/values.yaml
+```
+
+Then change directory to the scheduler plugins repository. 
+
+```bash
+cd ./upstream
 ```
 
 And build! You'll most likely want to set a custom registry and image name again:
@@ -90,12 +167,14 @@ And build! You'll most likely want to set a custom registry and image name again
 $ make local-image
 
 # this will build to docker.io/vanessa/fluence
-$ make local-image LOCAL_REGISTRY=vanessa LOCAL_IMAGE=fluence
+$ make local-image REGISTRY=vanessa CONTROLLER_IMAGE=fluence
 ```
+
+</details>
 
 **Important** the make command above produces _two images_ and you want to use the first that is mentioned in the output (not the second, which is a controller).
 
-And push to your registry for later!
+Whatever build approach you use, you'll want to push to your registry for later discovery!
 
 ```bash
 $ docker push docker.io/vanessa/fluence
@@ -115,23 +194,18 @@ $ kind create cluster
 ### Install Fluence
 
 For some background, the [Scheduling Framework](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/) provided by
-Kubernetes means that our container is going to provide specific endpoints to allow for custom scheduling.
-To make it possible to use our own plugin, we need to install our fork of [kubernetes-sigs/scheduler-plugins](https://github.com/kubernetes-sigs/scheduler-plugins) at [openshift-psap/scheduler-plugins](https://github.com/openshift-psap/scheduler-plugins.git) which will be done through Helm charts. We will be customizing the values.yaml file to point to our image. First, clone the repository:
+Kubernetes means that our container is going to provide specific endpoints to allow for custom scheduling. At this point you can follow the instructions
+under [deploy](#deploy) to ensure you have cloned the upstream kubernetes-sigs/scheduler-plugins and installed fluence. This section will provide
+more details to inspect attributes available to you. Let's say that you ran
 
 ```bash
-$ git clone https://github.com/openshift-psap/scheduler-plugins.git -b fluence
+$ make prepare
 ```
 
-Install the charts, using the images you just built:
+You could then inspect values with helm:
 
 ```bash
-$ cd scheduler-plugins/manifests/install/charts
-```
-
-Here is how to see values allowed. Note the name of the directory - "as-a-second-scheduler" - this is what we are going to be doing - installing
-Fluxion as a second scheduler!
-
-```bash
+$ cd upstream/manifests/install/charts
 $ helm show values as-a-second-scheduler/
 ```
 
@@ -171,14 +245,18 @@ plugins:
 </details>
 
 Note that this plugin is going to allow us to create a Deployment with our plugin to be used as a scheduler!
-So we are good installing the defaults.
+The `helm install` shown under [deploy](#deploy) is how you can install to your cluster, and then proceed to testing below.
+Here would be an example using custom images:
 
 ```bash
+$ cd upstream/manifests/install/charts
 $ helm install \
   --set scheduler.image=vanessa/fluence:latest \
   --set scheduler.sidecarimage=vanessa/fluence-sidecar \
     schedscheduler-plugins as-a-second-scheduler/
 ```
+
+Next you can move down to testing the install.
 
 ### Testing Install
 
@@ -186,7 +264,7 @@ The installation process will run one scheduler and one controller pod for the S
 You can double check that everything is running as follows:
 
 ```bash
-$ kubectl get pods -n scheduler-plugins
+$ kubectl get pods
 ```
 ```console
 NAME                                            READY   STATUS    RESTARTS   AGE

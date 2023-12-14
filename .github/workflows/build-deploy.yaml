@@ -17,24 +17,20 @@ jobs:
     runs-on: ubuntu-latest
     name: build fluence
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: actions/setup-go@v3
       with:
-        go-version: ^1.18.1
+        go-version: ^1.19
 
-    - name: Build Container
-      run: |
-        git clone -b fluence https://github.com/openshift-psap/scheduler-plugins ./plugins
-        cd ./plugins
-        make local-image LOCAL_REGISTRY=ghcr.io/flux-framework LOCAL_IMAGE=fluence
+    - name: Build Containers
+      run: make build REGISTRY=ghcr.io/flux-framework SCHEDULER_IMAGE=fluence
 
-    - name: Tag and Push Release Image
+    - name: Tag Release Image
       if: (github.event_name == 'release')
       run: |
         tag=${GITHUB_REF#refs/tags/}
-        echo "Tagging and releasing ${{ env.container }}:${tag}"
+        echo "Tagging and releasing ${{ env.container}}:${tag}"        
         docker tag ${{ env.container }}:latest ${{ env.container }}:${tag}
-        docker push ${{ env.container }}:${tag}
 
     - name: GHCR Login
       if: (github.event_name != 'pull_request')
@@ -46,7 +42,7 @@ jobs:
 
     - name: Deploy Container
       if: (github.event_name != 'pull_request')
-      run: docker push ${{ env.container }}:latest
+      run: docker push ${{ env.container }} --all-tags
       
   build-sidecar:
     permissions:
@@ -56,23 +52,20 @@ jobs:
     runs-on: ubuntu-latest
     name: build sidecar
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: actions/setup-go@v3
       with:
-        go-version: ^1.18.1
+        go-version: ^1.19
 
     - name: Build Container
-      run: |
-        cd scheduler-plugin
-        make LOCAL_REGISTRY=ghcr.io/flux-framework
+      run: make build-sidecar REGISTRY=ghcr.io/flux-framework SIDECAR_IMAGE=fluence-sidecar
 
-    - name: Tag and Push Release Image
+    - name: Tag Release Image
       if: (github.event_name == 'release')
       run: |
         tag=${GITHUB_REF#refs/tags/}
         echo "Tagging and releasing ${{ env.container }}:${tag}"
         docker tag ${{ env.container }}:latest ${{ env.container }}:${tag}
-        docker push ${{ env.container }}:${tag}
 
     - name: GHCR Login
       if: (github.event_name != 'pull_request')
@@ -84,4 +77,4 @@ jobs:
 
     - name: Deploy Container
       if: (github.event_name != 'pull_request')
-      run: docker push ${{ env.container }}:latest
+      run: docker push ${{ env.container }} --all-tags
