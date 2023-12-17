@@ -4,16 +4,19 @@
 
 scheduler:
   name: fluence
-  image: registry.k8s.io/scheduler-plugins/kube-scheduler:v0.27.8
+  image: ghcr.io/flux-framework/fluence:latest
   replicaCount: 1
   leaderElect: false
-  sidecarimage: quay.io/cmisale1/fluence-sidecar:latest
+  sidecarimage: ghcr.io/flux-framework/fluence-sidecar:latest
   policy: lonode
+  pullPolicy: Always
+  sidecarPullPolicy: Always
 
 controller:
   name: scheduler-plugins-controller
   image: registry.k8s.io/scheduler-plugins/controller:v0.27.8
   replicaCount: 1
+  pullPolicy: IfNotPresent
 
 # LoadVariationRiskBalancing and TargetLoadPacking are not enabled by default
 # as they need extra RBAC privileges on metrics.k8s.io.
