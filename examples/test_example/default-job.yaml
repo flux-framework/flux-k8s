@@ -1,0 +1,14 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: default-job
+spec:
+  template:
+    spec:
+      schedulerName: default-scheduler
+      containers:
+      - name: default-job
+        image: busybox
+        command: [echo, not, potato]
+      restartPolicy: Never
+  backoffLimit: 4

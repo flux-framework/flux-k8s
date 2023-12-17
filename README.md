@@ -4,8 +4,6 @@
 
 Fluence enables HPC-grade pod scheduling in Kubernetes via the [Kubernetes Scheduling Framework](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/). Fluence uses the directed-graph based [Fluxion scheduler](https://github.com/flux-framework/flux-sched) to map pods or [podgroups](https://github.com/kubernetes-sigs/scheduler-plugins/tree/master/pkg/coscheduling) to nodes. Fluence supports all the Fluxion scheduling algorithms (e.g., `hi`, `low`, `hinode`, etc.). Note that Fluence does not currently support use in conjunction with the kube-scheduler. Pods must all be scheduled by Fluence.
 
-🚧️ Under Construction! 🚧️
-
 ## Getting started
 
 For instructions on how to start Fluence on a K8s cluster, see [examples](examples/). Documentation and instructions for reproducing our CANOPIE2022 paper (citation below) can be found in the [canopie22-artifacts branch](https://github.com/flux-framework/flux-k8s/tree/canopie22-artifacts).
@@ -184,12 +182,13 @@ docker push docker.io/vanessa/fluence
 
 > Prepare a cluster and install the Kubernetes scheduling plugins framework
 
-These steps will require a Kubernetes cluster to install to, and having pushed the plugin container to a registry. If you aren't using a cloud provider, you can
-create a local one with `kind`:
+These steps will require a Kubernetes cluster to install to, and having pushed the plugin container to a registry. If you aren't using a cloud provider, you can create a local one with `kind`:
 
 ```bash
 kind create cluster
 ```
+
+**Important** if you are developing or testing fluence, note that custom scheduler plugins don't seem to work out of the box with MiniKube (but everything works with kind). Likely there are extensions or similar that need to be configured with MiniKube (that we have not looked into).
 
 ### Install Fluence
 
@@ -220,19 +219,19 @@ helm show values as-a-second-scheduler/
 
 scheduler:
   name: fluence
-  # image: k8s.gcr.io/scheduler-plugins/kube-scheduler:v0.23.10
-  image: quay.io/cmisale1/fluence:upstream
-  namespace: scheduler-plugins
+  image: registry.k8s.io/scheduler-plugins/kube-scheduler:v0.27.8
   replicaCount: 1
   leaderElect: false
-  sidecarimage: quay.io/cmisale1/fluence-sidecar:latest
+  sidecarimage: ghcr.io/flux-framework/fluence-sidecar:latest
   policy: lonode
+  pullPolicy: Always
+  sidecarPullPolicy: Always
 
 controller:
   name: scheduler-plugins-controller
-  image: k8s.gcr.io/scheduler-plugins/controller:v0.23.10
-  namespace: scheduler-plugins
+  image: registry.k8s.io/scheduler-plugins/controller:v0.27.8
   replicaCount: 1
+  pullPolicy: IfNotPresent
 
 # LoadVariationRiskBalancing and TargetLoadPacking are not enabled by default
 # as they need extra RBAC privileges on metrics.k8s.io.
@@ -240,13 +239,25 @@ controller:
 plugins:
   enabled: ["Fluence"]
   disabled: ["CapacityScheduling","NodeResourceTopologyMatch","NodeResourcesAllocatable","PrioritySort","Coscheduling"] # only in-tree plugins need to be defined here
+
+# Customize the enabled plugins' config.
+# Refer to the "pluginConfig" section of manifests/<plugin>/scheduler-config.yaml.
+# For example, for Coscheduling plugin, you want to customize the permit waiting timeout to 10 seconds:
+pluginConfig:
+- name: Coscheduling
+  args:
+    permitWaitingTimeSeconds: 10 # default is 60
+# Or, customize the other plugins
+# - name: NodeResourceTopologyMatch
+#   args:
+#     scoringStrategy:
+#       type: MostAllocated # default is LeastAllocated
 ```
 
 </details>
 
 Note that this plugin is going to allow us to create a Deployment with our plugin to be used as a scheduler!
-The `helm install` shown under [deploy](#deploy) is how you can install to your cluster, and then proceed to testing below.
-Here would be an example using custom images:
+The `helm install` shown under [deploy](#deploy) is how you can install to your cluster, and then proceed to testing below. Here would be an example using custom images:
 
 ```bash
 cd upstream/manifests/install/charts
@@ -254,6 +265,22 @@ helm install \
   --set scheduler.image=vanessa/fluence:latest \
   --set scheduler.sidecarimage=vanessa/fluence-sidecar \
     schedscheduler-plugins as-a-second-scheduler/
+```
+
+If you load your images into your testing environment and don't need to pull, you can change the pull policy too:
+
+```bash
+helm install \
+  --set scheduler.image=vanessa/fluence:latest \
+  --set scheduler.sidecarimage=vanessa/fluence-sidecar \
+  --set scheduler.sidecarPullPolicy=IfNotPresent \
+    schedscheduler-plugins as-a-second-scheduler/
+```
+
+If you need to uninstall (e.g., to redo something):
+
+```bash
+helm uninstall schedscheduler-plugins
 ```
 
 Next you can move down to testing the install.
@@ -400,7 +427,9 @@ pod/fluence-scheduled-pod  spec.containers{fluence-scheduled-container}  kubelet
 ...
 ```
 
-There might be a better way to see that? Anyway, really cool! For the above, I found [this page](https://kubernetes.io/docs/tasks/extend-kubernetes/configure-multiple-schedulers/#enable-leader-election) very helpful.
+For the above, I found [this page](https://kubernetes.io/docs/tasks/extend-kubernetes/configure-multiple-schedulers/#enable-leader-election) very helpful.
+
+Finally, note that we also have a more appropriate example with jobs under [examples/test_example](examples/test_example). It's slightly more sane because it uses Job, and jobs are expected to complete (whereas pods are not and will get into crash loop backoffs, etc). For example of how to programmatically interact with the job pods and check states, events, see the [test.sh](.github/test.sh) script.
 
 
 ## Papers
