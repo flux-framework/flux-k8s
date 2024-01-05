@@ -1,0 +1,14 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fluence-job
+spec:
+  template:
+    spec:
+      schedulerName: fluence
+      containers:
+      - name: fluence-job
+        image: busybox
+        command: [echo, potato]
+      restartPolicy: Never
+  backoffLimit: 4

@@ -1,0 +1,139 @@
+name: fluence build test
+
+on:
+  pull_request: []
+  # Test on demand (dispath) or once a week, sunday
+  # We combine the builds into one job to simplify not needing to share
+  # containers between jobs. We also don't want to push unless the tests pass.
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'
+
+jobs:
+  build-fluence:
+    env:
+      container: ghcr.io/flux-framework/fluence
+    runs-on: ubuntu-latest
+    name: build fluence
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v3
+      with:
+        go-version: ^1.19
+
+    - name: Build Containers
+      run: |
+        make prepare
+        make build REGISTRY=ghcr.io/flux-framework SCHEDULER_IMAGE=fluence
+
+    - name: Save Container
+      run: docker save ${{ env.container }} | gzip > fluence_latest.tar.gz
+
+    - name: Upload container artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: fluence
+        path: fluence_latest.tar.gz
+      
+  build-sidecar:
+    env:
+      container: ghcr.io/flux-framework/fluence-sidecar
+    runs-on: ubuntu-latest
+    name: build sidecar
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v3
+      with:
+        go-version: ^1.19
+
+    - name: Build Container
+      run: |
+        make prepare
+        make build-sidecar REGISTRY=ghcr.io/flux-framework SIDECAR_IMAGE=fluence-sidecar
+
+    - name: Save Container
+      run: docker save ${{ env.container }} | gzip > fluence_sidecar_latest.tar.gz
+
+    - name: Upload container artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: fluence_sidecar
+        path: fluence_sidecar_latest.tar.gz
+      
+  test-fluence:
+    needs: [build-fluence, build-sidecar]
+    permissions:
+      packages: write
+    env:
+      fluence_container: ghcr.io/flux-framework/fluence
+      sidecar_container: ghcr.io/flux-framework/fluence-sidecar
+
+    runs-on: ubuntu-latest
+    name: build fluence
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v3
+      with:
+        go-version: ^1.20
+
+    - name: Download fluence artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: fluence
+        path: /tmp
+
+    - name: Download fluence_sidecar artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: fluence_sidecar
+        path: /tmp
+
+    - name: Load Docker images
+      run: |
+        ls /tmp/*.tar.gz
+        docker load --input /tmp/fluence_sidecar_latest.tar.gz
+        docker load --input /tmp/fluence_latest.tar.gz
+        docker image ls -a | grep fluence
+
+    - name: Create Kind Cluster
+      uses: helm/kind-action@v1.5.0
+      with:
+        cluster_name: kind
+        kubectl_version: v1.28.2
+        version: v0.20.0
+        
+    - name: Load Docker Containers into Kind
+      env:
+        fluence: ${{ env.fluence_container }}
+        sidecar: ${{ env.sidecar_container }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        kind load docker-image ${fluence}
+        kind load docker-image ${sidecar}
+
+    - name: Test Fluence
+      run: /bin/bash ./.github/test.sh
+
+    - name: Tag Weekly Images
+      run: |
+        # YEAR-MONTH-DAY or #YYYY-MM-DD
+        tag=$(echo $(date +%Y-%m-%d))
+        echo "Tagging and releasing ${{ env.fluence_container}}:${tag}"        
+        docker tag ${{ env.fluence_container }}:latest ${{ env.fluence_container }}:${tag}
+        echo "Tagging and releasing ${{ env.sidecar_container}}:${tag}"        
+        docker tag ${{ env.sidecar_container }}:latest ${{ env.sidecar_container }}:${tag}
+
+     # If we get here, tests pass, and we can deploy
+    - name: GHCR Login
+      if: (github.event_name != 'pull_request')
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Deploy Containers
+      if: (github.event_name != 'pull_request')
+      run: |
+        docker push ${{ env.fluence_container }} --all-tags
+        docker push ${{ env.sidecar_container }} --all-tags
