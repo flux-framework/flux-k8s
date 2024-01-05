@@ -19,7 +19,7 @@ spec:
       containers:
       - name: scheduler-plugins-controller
         image: {{ .Values.controller.image }}
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: {{ .Values.controller.pullPolicy }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -41,7 +41,7 @@ spec:
       serviceAccountName: {{ .Values.scheduler.name }}
       containers:
       - image: {{ .Values.scheduler.sidecarimage }}
-        imagePullPolicy: Always
+        imagePullPolicy: {{ .Values.scheduler.sidecarPullPolicy }}
         command:
         - /go/src/fluence/bin/server
         - --policy={{ .Values.scheduler.policy }}
@@ -51,7 +51,7 @@ spec:
         - --config=/etc/kubernetes/scheduler-config.yaml
         - -v=9
         image: {{ .Values.scheduler.image }}
-        imagePullPolicy: Always
+        imagePullPolicy: {{ .Values.scheduler.pullPolicy }}
         livenessProbe:
           httpGet:
             path: /healthz
