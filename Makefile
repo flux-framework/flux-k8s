@@ -10,15 +10,20 @@ SIDECAR_IMAGE ?= fluence-sidecar:latest
 CONTROLLER_IMAGE ?= fluence-controller
 SCHEDULER_IMAGE ?= fluence
 
-.PHONY: all build build-sidecar prepare push push-sidecar push-controller
+.PHONY: all build build-sidecar clone prepare push push-sidecar push-controller
 
-all: build-sidecar prepare build
+all: build-sidecar prepare build update clone update
 
 build-sidecar: 
 	make -C ./src LOCAL_REGISTRY=${REGISTRY} LOCAL_IMAGE=${SIDECAR_IMAGE}
 
-prepare: 
+clone:
 	if [ -d "$(CLONE_UPSTREAM)" ]; then echo "Upstream is cloned"; else git clone $(UPSTREAM) ./$(CLONE_UPSTREAM); fi
+
+update: clone
+	git -C $(CLONE_UPSTREAM) pull origin master
+
+prepare: clone
 	# These are entirely new directory structures
 	cp -R sig-scheduler-plugins/pkg/fluence $(CLONE_UPSTREAM)/pkg/fluence
 	cp -R sig-scheduler-plugins/manifests/fluence $(CLONE_UPSTREAM)/manifests/fluence

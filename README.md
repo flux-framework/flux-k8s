@@ -440,7 +440,17 @@ You can see [deploy](#deploy) for instructions on how to do a custom deployment.
  - [sig-scheduler-plugins](sig-scheduler-plugins): includes assets (manifests and Go files) that are intended to be added to the kubernetes-sigs/scheduler-plugins upstream repository before build
  - *upstream*: the default name this upstream is cloned to when you do a make build command.
 
-Note that the clone of the repository and copying of files to the correct locations is all automated through the [Makefile](Makefile). This section exists to alert you to where to look for the different assets defined above.
+Note that the clone of the repository and copying of files to the correct locations is all automated through the [Makefile](Makefile). Additional commands provided include the following:
+
+```bash
+# Only clone the repository into ./upstream
+make clone
+
+# Update the cloned upstream with a git pull origin master
+make update
+```
+
+It's recommend to update once in a while if you have an older clone locally and there might be changes you are not accounting for.
 
 ## Papers
 
