@@ -11,6 +11,7 @@ For background on the Flux framework and the Fluxion scheduler, you can take a l
 
  - To deploy our pre-built images, go to [Deploy](#deploy)
  - To build your own images, go to [Setup](#setup)
+ - To learn about repository organization, see [Developer](#developer)
 
 ### Deploy
 
@@ -431,6 +432,15 @@ For the above, I found [this page](https://kubernetes.io/docs/tasks/extend-kuber
 
 Finally, note that we also have a more appropriate example with jobs under [examples/test_example](examples/test_example). It's slightly more sane because it uses Job, and jobs are expected to complete (whereas pods are not and will get into crash loop backoffs, etc). For example of how to programmatically interact with the job pods and check states, events, see the [test.sh](.github/test.sh) script.
 
+### Developer
+
+You can see [deploy](#deploy) for instructions on how to do a custom deployment. If you are looking to develop:
+
+ - [src](src): includes source code for fluence
+ - [sig-scheduler-plugins](sig-scheduler-plugins): includes assets (manifests and Go files) that are intended to be added to the kubernetes-sigs/scheduler-plugins upstream repository before build
+ - *upstream*: the default name this upstream is cloned to when you do a make build command.
+
+Note that the clone of the repository and copying of files to the correct locations is all automated through the [Makefile](Makefile). This section exists to alert you to where to look for the different assets defined above.
 
 ## Papers
 

@@ -62,7 +62,7 @@ func (f *Fluence) Name() string {
 	return Name
 }
 
-// initialize and return a new Flux Plugin
+// Initialize and return a new Fluence Custom Scheduler Plugin
 // Note from vsoch: seems analogous to:
 // https://github.com/kubernetes-sigs/scheduler-plugins/blob/master/pkg/coscheduling/coscheduling.go#L63
 func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
@@ -82,9 +82,9 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 	klog.Info("Create generic pod informer")
 
 	scheme := runtime.NewScheme()
-	_ = clientscheme.AddToScheme(scheme)
-	_ = v1.AddToScheme(scheme)
-	_ = v1alpha1.AddToScheme(scheme)
+	clientscheme.AddToScheme(scheme)
+	v1.AddToScheme(scheme)
+	v1alpha1.AddToScheme(scheme)
 	client, err := client.New(handle.KubeConfig(), client.Options{Scheme: scheme})
 	if err != nil {
 		return nil, err
@@ -121,7 +121,7 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 		return nil, err
 	}
 
-	klog.Info("Fluence starts")
+	klog.Info("Fluence start")
 	return f, nil
 }
 
