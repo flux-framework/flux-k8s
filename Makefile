@@ -10,9 +10,9 @@ SIDECAR_IMAGE ?= fluence-sidecar:latest
 CONTROLLER_IMAGE ?= fluence-controller
 SCHEDULER_IMAGE ?= fluence
 
-.PHONY: all build build-sidecar clone prepare push push-sidecar push-controller
+.PHONY: all build build-sidecar clone update push push-sidecar push-controller
 
-all: build-sidecar prepare build update clone update
+all: build-sidecar prepare build update clone
 
 build-sidecar: 
 	make -C ./src LOCAL_REGISTRY=${REGISTRY} LOCAL_IMAGE=${SIDECAR_IMAGE}
@@ -25,6 +25,8 @@ update: clone
 
 prepare: clone
 	# These are entirely new directory structures
+	rm -rf $(CLONE_UPSTREAM)/pkg/fluence
+	rm -rf $(CLONE_UPSTREAM)/manifests/fluence
 	cp -R sig-scheduler-plugins/pkg/fluence $(CLONE_UPSTREAM)/pkg/fluence
 	cp -R sig-scheduler-plugins/manifests/fluence $(CLONE_UPSTREAM)/manifests/fluence
 	# These are files with subtle changes to add fluence

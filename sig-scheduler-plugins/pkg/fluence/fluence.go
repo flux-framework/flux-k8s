@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"sync"
 	"time"
 
@@ -36,6 +37,7 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/metrics"
 
+	corelisters "k8s.io/client-go/listers/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 	coschedulingcore "sigs.k8s.io/scheduler-plugins/pkg/coscheduling/core"
@@ -49,21 +51,32 @@ type Fluence struct {
 	handle         framework.Handle
 	podNameToJobId map[string]uint64
 	pgMgr          coschedulingcore.Manager
+
+	// The pod group manager has a lister, but it's private
+	podLister corelisters.PodLister
 }
 
-var _ framework.QueueSortPlugin = &Fluence{}
-var _ framework.PreFilterPlugin = &Fluence{}
-var _ framework.FilterPlugin = &Fluence{}
-
 // Name is the name of the plugin used in the Registry and configurations.
-const Name = "Fluence"
+// Note that this would do better as an annotation (fluence.flux-framework.org/pod-group)
+// But we cannot use them as selectors then!
+const (
+	Name              = "Fluence"
+	PodGroupNameLabel = "fluence.pod-group"
+	PodGroupSizeLabel = "fluence.group-size"
+)
+
+var (
+	_ framework.QueueSortPlugin = &Fluence{}
+	_ framework.PreFilterPlugin = &Fluence{}
+	_ framework.FilterPlugin    = &Fluence{}
+)
 
 func (f *Fluence) Name() string {
 	return Name
 }
 
 // Initialize and return a new Fluence Custom Scheduler Plugin
-// Note from vsoch: seems analogous to:
+// This class and functions are analogous to:
 // https://github.com/kubernetes-sigs/scheduler-plugins/blob/master/pkg/coscheduling/coscheduling.go#L63
 func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 
@@ -85,7 +98,7 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 	clientscheme.AddToScheme(scheme)
 	v1.AddToScheme(scheme)
 	v1alpha1.AddToScheme(scheme)
-	client, err := client.New(handle.KubeConfig(), client.Options{Scheme: scheme})
+	k8scli, err := client.New(handle.KubeConfig(), client.Options{Scheme: scheme})
 	if err != nil {
 		return nil, err
 	}
@@ -95,20 +108,23 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 		klog.ErrorS(err, "ParseSelector failed")
 		os.Exit(1)
 	}
+
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(handle.ClientSet(), 0, informers.WithTweakListOptions(func(opt *metav1.ListOptions) {
 		opt.FieldSelector = fieldSelector.String()
 	}))
 	podInformer := informerFactory.Core().V1().Pods()
-
 	scheduleTimeDuration := time.Duration(500) * time.Second
 
 	pgMgr := coschedulingcore.NewPodGroupManager(
-		client,
+		k8scli,
 		handle.SnapshotSharedLister(),
 		&scheduleTimeDuration,
 		podInformer,
 	)
 	f.pgMgr = pgMgr
+
+	// Save the podLister to fluence to easily query for the group
+	f.podLister = podInformer.Lister()
 
 	// stopCh := make(chan struct{})
 	// defer close(stopCh)
@@ -125,26 +141,113 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 	return f, nil
 }
 
+// getFluenceGroup uses a selector and lister to return the group of
+// pods associated with a particular fluence label
+func (f *Fluence) getFluenceGroup(groupName string) ([]*v1.Pod, error) {
+
+	pods := []*v1.Pod{}
+
+	// Prepare a label selector
+	ls := metav1.LabelSelector{MatchLabels: map[string]string{PodGroupNameLabel: groupName}}
+
+	// Get all Pods that potentially belong to this Deployment.
+	selector, err := metav1.LabelSelectorAsSelector(&ls)
+	if err != nil {
+		return pods, err
+	}
+	pods, err = f.podLister.Pods("").List(selector)
+	if err != nil {
+		return pods, err
+	}
+	klog.Infof("Found %d pods", len(pods))
+	return pods, nil
+}
+
+// getFluenceGroupTimestamp gets the time for the earliest created fluence group pod
+// If the pod isn't in a Fluence group, we fall back it it's time
+func (f *Fluence) getFluenceGroupTimestamp(pod *v1.Pod) time.Time {
+
+	// This would be the "zero" equivalent of time we can check with time.isZero()
+	ts := time.Time{}
+
+	// First try to get the groupname. If no group, return pod creation timestamp
+	groupName := f.getFluenceGroupName(pod)
+	klog.Infof("group name is %s", groupName)
+	if groupName == "" {
+		return ts
+	}
+
+	// Now query for all pods in the group
+	groupPods, err := f.getFluenceGroup(groupName)
+	if err != nil {
+		klog.Infof("get fluence group generated error: %s", err)
+		return ts
+	}
+	// Sort based on creation time
+	sort.Slice(groupPods, func(p1, p2 int) bool {
+		return groupPods[p1].CreationTimestamp.Before(&groupPods[p2].CreationTimestamp)
+	})
+
+	klog.Infof("first time: %s", groupPods[0].CreationTimestamp.Time)
+	klog.Infof("last time: %s", groupPods[len(groupPods)-1].CreationTimestamp.Time)
+	return groupPods[0].CreationTimestamp.Time
+}
+
+// getFluenceGroup looks for the group to indicate a fluence group, and returns it
+func (f *Fluence) getFluenceGroupName(pod *v1.Pod) string {
+	groupName, _ := pod.Labels[PodGroupNameLabel]
+	return groupName
+}
+
 // Less is used to sort pods in the scheduling queue in the following order.
 // 1. Compare the priorities of Pods.
 // 2. Compare the initialization timestamps of PodGroups or Pods.
 // 3. Compare the keys of PodGroups/Pods: <namespace>/<podname>.
 func (f *Fluence) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
 	klog.Infof("ordering pods from Coscheduling")
+
+	// First preference to priority, but only if they are different
 	prio1 := corev1helpers.PodPriority(podInfo1.Pod)
 	prio2 := corev1helpers.PodPriority(podInfo2.Pod)
+
+	// ...and only allow this to sort if they aren't the same
 	if prio1 != prio2 {
 		return prio1 > prio2
 	}
+
+	// Second priority goes to the fluence group name, which must be defined for both
+	// We select the earliest time from the created pods in the group. It's OK if not
+	// all are created because the earliest one will be.
+	// UPDATE: this approach won't work for indexed jobs that complete
+	fluenceTime1 := f.getFluenceGroupTimestamp(podInfo1.Pod)
+	fluenceTime2 := f.getFluenceGroupTimestamp(podInfo2.Pod)
+	klog.Infof("fluence time 1: %s", fluenceTime1)
+	klog.Infof("fluence time 2: %s", fluenceTime2)
+
+	// only comparable if not equal!
+	if !fluenceTime1.Equal(fluenceTime2) {
+		return fluenceTime1.Before(fluenceTime2)
+	}
+
+	// PodGroup is implemented in upstream but is a bit stale, but still support it if used
+	// A pod without a PodGroup returns a timestamp of 0, so we either schedule any groups first
 	creationTime1 := f.pgMgr.GetCreationTimestamp(podInfo1.Pod, *podInfo1.InitialAttemptTimestamp)
 	creationTime2 := f.pgMgr.GetCreationTimestamp(podInfo2.Pod, *podInfo2.InitialAttemptTimestamp)
+
+	// Or if they are both 0, fall back to sorting by name.
 	if creationTime1.Equal(creationTime2) {
 		return coschedulingcore.GetNamespacedName(podInfo1.Pod) < coschedulingcore.GetNamespacedName(podInfo2.Pod)
 	}
 	return creationTime1.Before(creationTime2)
 }
 
-func (f *Fluence) PreFilter(ctx context.Context, state *framework.CycleState, pod *v1.Pod) (*framework.PreFilterResult, *framework.Status) {
+// PreFilter
+func (f *Fluence) PreFilter(
+	ctx context.Context,
+	state *framework.CycleState,
+	pod *v1.Pod,
+) (*framework.PreFilterResult, *framework.Status) {
+
 	klog.Infof("Examining the pod")
 	var err error
 	var nodename string
@@ -174,6 +277,8 @@ func (f *Fluence) PreFilter(ctx context.Context, state *framework.CycleState, po
 
 }
 
+// isGroup determines if the pod belongs to a group known by fluence
+// If a flux-framework/fluence.pod-group: <size> label is not provided,
 func (f *Fluence) isGroup(ctx context.Context, pod *v1.Pod) (string, bool) {
 	pgFullName, pg := f.pgMgr.GetPodGroup(ctx, pod)
 	if pg == nil {
@@ -329,7 +434,7 @@ func (f *Fluence) cancelFluxJobForPod(podName string) error {
 func (f *Fluence) updatePod(oldObj, newObj interface{}) {
 	// klog.Info("Update Pod event handler")
 	newPod := newObj.(*v1.Pod)
-	klog.Infof("Processing event for pod %s", newPod)
+	klog.Infof("Processing event for pod %s", newPod.Name)
 	switch newPod.Status.Phase {
 	case v1.PodPending:
 		// in this state we don't know if a pod is going to be running, thus we don't need to update job map

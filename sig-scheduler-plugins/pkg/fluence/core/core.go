@@ -29,10 +29,7 @@ type FluxStateData struct {
 }
 
 func (s *FluxStateData) Clone() framework.StateData {
-	clone := &FluxStateData{
-		NodeName: s.NodeName,
-	}
-	return clone
+	return &FluxStateData{NodeName: s.NodeName}
 }
 
 type NodePodsCount struct {
@@ -75,12 +72,10 @@ func HaveList(pgname string) bool {
 func GetNextNode(pgname string) (string, error) {
 	entry, ok := podgroupMap[pgname]
 	if !ok {
-		err := fmt.Errorf("Map is empty")
-		return "", err
+		return "", fmt.Errorf("Map is empty")
 	}
 	if len(entry) == 0 {
-		err := fmt.Errorf("Error while getting a node")
-		return "", err
+		return "", fmt.Errorf("Error while getting a node")
 	}
 
 	nodename := entry[0].NodeName
