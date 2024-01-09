@@ -36,8 +36,9 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/metrics"
 
+	corelisters "k8s.io/client-go/listers/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
+	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 	coschedulingcore "sigs.k8s.io/scheduler-plugins/pkg/coscheduling/core"
 	fcore "sigs.k8s.io/scheduler-plugins/pkg/fluence/core"
 	pb "sigs.k8s.io/scheduler-plugins/pkg/fluence/fluxcli-grpc"
@@ -47,27 +48,38 @@ import (
 type Fluence struct {
 	mutex          sync.Mutex
 	handle         framework.Handle
+	client         client.Client
 	podNameToJobId map[string]uint64
 	pgMgr          coschedulingcore.Manager
+
+	// The pod group manager has a lister, but it's private
+	podLister corelisters.PodLister
 }
 
-var _ framework.QueueSortPlugin = &Fluence{}
-var _ framework.PreFilterPlugin = &Fluence{}
-var _ framework.FilterPlugin = &Fluence{}
-
 // Name is the name of the plugin used in the Registry and configurations.
-const Name = "Fluence"
+// Note that this would do better as an annotation (fluence.flux-framework.org/pod-group)
+// But we cannot use them as selectors then!
+const (
+	Name = "Fluence"
+)
+
+var (
+	_ framework.QueueSortPlugin = &Fluence{}
+	_ framework.PreFilterPlugin = &Fluence{}
+	_ framework.FilterPlugin    = &Fluence{}
+)
 
 func (f *Fluence) Name() string {
 	return Name
 }
 
 // Initialize and return a new Fluence Custom Scheduler Plugin
-// Note from vsoch: seems analogous to:
+// This class and functions are analogous to:
 // https://github.com/kubernetes-sigs/scheduler-plugins/blob/master/pkg/coscheduling/coscheduling.go#L63
 func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 
 	f := &Fluence{handle: handle, podNameToJobId: make(map[string]uint64)}
+
 	klog.Info("Create plugin")
 	ctx := context.TODO()
 	fcore.Init()
@@ -84,31 +96,37 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 	scheme := runtime.NewScheme()
 	clientscheme.AddToScheme(scheme)
 	v1.AddToScheme(scheme)
-	v1alpha1.AddToScheme(scheme)
-	client, err := client.New(handle.KubeConfig(), client.Options{Scheme: scheme})
+	sched.AddToScheme(scheme)
+	k8scli, err := client.New(handle.KubeConfig(), client.Options{Scheme: scheme})
 	if err != nil {
 		return nil, err
 	}
+
+	// Save the kubernetes client for fluence to interact with cluster objects
+	f.client = k8scli
 
 	fieldSelector, err := fields.ParseSelector(",status.phase!=" + string(v1.PodSucceeded) + ",status.phase!=" + string(v1.PodFailed))
 	if err != nil {
 		klog.ErrorS(err, "ParseSelector failed")
 		os.Exit(1)
 	}
+
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(handle.ClientSet(), 0, informers.WithTweakListOptions(func(opt *metav1.ListOptions) {
 		opt.FieldSelector = fieldSelector.String()
 	}))
 	podInformer := informerFactory.Core().V1().Pods()
-
 	scheduleTimeDuration := time.Duration(500) * time.Second
 
 	pgMgr := coschedulingcore.NewPodGroupManager(
-		client,
+		k8scli,
 		handle.SnapshotSharedLister(),
 		&scheduleTimeDuration,
 		podInformer,
 	)
 	f.pgMgr = pgMgr
+
+	// Save the podLister to fluence to easily query for the group
+	f.podLister = podInformer.Lister()
 
 	// stopCh := make(chan struct{})
 	// defer close(stopCh)
@@ -127,8 +145,9 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 
 // Less is used to sort pods in the scheduling queue in the following order.
 // 1. Compare the priorities of Pods.
-// 2. Compare the initialization timestamps of PodGroups or Pods.
-// 3. Compare the keys of PodGroups/Pods: <namespace>/<podname>.
+// 2. Compare the initialization timestamps of fluence pod groups
+// 3. Fall back, sort by namespace/name
+// See 	https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/
 func (f *Fluence) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
 	klog.Infof("ordering pods from Coscheduling")
 	prio1 := corev1helpers.PodPriority(podInfo1.Pod)
@@ -144,59 +163,72 @@ func (f *Fluence) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
 	return creationTime1.Before(creationTime2)
 }
 
-func (f *Fluence) PreFilter(ctx context.Context, state *framework.CycleState, pod *v1.Pod) (*framework.PreFilterResult, *framework.Status) {
+// getPodGroup gets the group information from the pod group manager
+// to determine if a pod is in a group. We return the group
+func (f *Fluence) getPodGroup(ctx context.Context, pod *v1.Pod) (string, *sched.PodGroup) {
+	pgName, pg := f.pgMgr.GetPodGroup(ctx, pod)
+	if pg == nil {
+		klog.InfoS("Not in group", "pod", klog.KObj(pod))
+	}
+	return pgName, pg
+}
+
+// PreFilter checks info about the Pod / checks conditions that the cluster or the Pod must meet.
+// This still comes after sort
+func (f *Fluence) PreFilter(
+	ctx context.Context,
+	state *framework.CycleState,
+	pod *v1.Pod,
+) (*framework.PreFilterResult, *framework.Status) {
+
+	var (
+		err      error
+		nodename string
+	)
 	klog.Infof("Examining the pod")
-	var err error
-	var nodename string
-	if pgname, ok := f.isGroup(ctx, pod); ok {
-		if !fcore.HaveList(pgname) {
+
+	// Get the pod group name and group
+	groupName, pg := f.getPodGroup(ctx, pod)
+	klog.Infof("group name is %s", groupName)
+
+	// Case 1: We have a pod group
+	if pg != nil {
+
+		// We have not yet derived a node list
+		if !fcore.HaveList(groupName) {
 			klog.Infof("Getting a pod group")
-			groupSize, _ := f.groupPreFilter(ctx, pod)
-			if _, err = f.AskFlux(ctx, pod, groupSize); err != nil {
+			if _, err = f.AskFlux(ctx, pod, int(pg.Spec.MinMember)); err != nil {
 				return nil, framework.NewStatus(framework.Unschedulable, err.Error())
 			}
 		}
-		nodename, err = fcore.GetNextNode(pgname)
-		klog.Infof("Node Selected %s (%s:%s)", nodename, pod.Name, pgname)
+		nodename, err = fcore.GetNextNode(groupName)
+		klog.Infof("Node Selected %s (%s:%s)", nodename, pod.Name, groupName)
 		if err != nil {
 			return nil, framework.NewStatus(framework.Unschedulable, err.Error())
 		}
+
 	} else {
+
+		// Case 2: no group, a faux group of a lonely 1 :(
 		nodename, err = f.AskFlux(ctx, pod, 1)
 		if err != nil {
 			return nil, framework.NewStatus(framework.Unschedulable, err.Error())
 		}
 	}
 
+	// Create a fluxState (CycleState) with things that might be useful/
 	klog.Info("Node Selected: ", nodename)
 	state.Write(framework.StateKey(pod.Name), &fcore.FluxStateData{NodeName: nodename})
 	return nil, framework.NewStatus(framework.Success, "")
-
 }
 
-func (f *Fluence) isGroup(ctx context.Context, pod *v1.Pod) (string, bool) {
-	pgFullName, pg := f.pgMgr.GetPodGroup(ctx, pod)
-	if pg == nil {
-		klog.InfoS("Not in group", "pod", klog.KObj(pod))
-		return "", false
-	}
-	return pgFullName, true
-}
+func (f *Fluence) Filter(
+	ctx context.Context,
+	cycleState *framework.CycleState,
+	pod *v1.Pod,
+	nodeInfo *framework.NodeInfo,
+) *framework.Status {
 
-func (f *Fluence) groupPreFilter(ctx context.Context, pod *v1.Pod) (int, error) {
-	// klog.InfoS("Flux Pre-Filter", "pod", klog.KObj(pod))
-	klog.InfoS("Flux Pre-Filter", "pod labels", pod.Labels)
-	_, pg := f.pgMgr.GetPodGroup(ctx, pod)
-	if pg == nil {
-		klog.InfoS("Not in group", "pod", klog.KObj(pod))
-		return 0, nil
-	}
-
-	klog.Info("pod group members ", pg.Spec.MinMember)
-	return int(pg.Spec.MinMember), nil
-}
-
-func (f *Fluence) Filter(ctx context.Context, cycleState *framework.CycleState, pod *v1.Pod, nodeInfo *framework.NodeInfo) *framework.Status {
 	klog.Info("Filtering input node ", nodeInfo.Node().Name)
 	if v, e := cycleState.Read(framework.StateKey(pod.Name)); e == nil {
 		if value, ok := v.(*fcore.FluxStateData); ok && value.NodeName != nodeInfo.Node().Name {
@@ -205,14 +237,16 @@ func (f *Fluence) Filter(ctx context.Context, cycleState *framework.CycleState, 
 			klog.Info("Filter: node selected by Flux ", value.NodeName)
 		}
 	}
-
 	return framework.NewStatus(framework.Success)
 }
 
+// PreFilterExtensions allow for callbacks on filtered states
+// https://github.com/kubernetes/kubernetes/blob/master/pkg/scheduler/framework/interface.go#L383
 func (f *Fluence) PreFilterExtensions() framework.PreFilterExtensions {
 	return nil
 }
 
+// AskFlux will ask flux for an allocation for nodes for the pod group.
 func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, count int) (string, error) {
 	// clean up previous match if a pod has already allocated previously
 	f.mutex.Lock()
@@ -252,8 +286,9 @@ func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, count int) (string, 
 
 	klog.Infof("[FluxClient] response podID %s", r.GetPodID())
 
-	_, ok := f.isGroup(ctx, pod)
-	if count > 1 || ok {
+	_, pg := f.getPodGroup(ctx, pod)
+
+	if count > 1 || pg != nil {
 		pgFullName, _ := f.pgMgr.GetPodGroup(ctx, pod)
 		nodelist := fcore.CreateNodePodsList(r.GetNodelist(), pgFullName)
 		klog.Infof("[FluxClient] response nodeID %s", r.GetNodelist())
@@ -279,6 +314,7 @@ func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, count int) (string, 
 	return "", nil
 }
 
+// cancelFluxJobForPod cancels the flux job for a pod.
 func (f *Fluence) cancelFluxJobForPod(podName string) error {
 	jobid := f.podNameToJobId[podName]
 
@@ -325,11 +361,13 @@ func (f *Fluence) cancelFluxJobForPod(podName string) error {
 	return nil
 }
 
-// EventHandlers
+// EventHandlers updatePod handles cleaning up resources
 func (f *Fluence) updatePod(oldObj, newObj interface{}) {
 	// klog.Info("Update Pod event handler")
 	newPod := newObj.(*v1.Pod)
-	klog.Infof("Processing event for pod %s", newPod)
+
+	klog.Infof("Processing event for pod %s", newPod.Name)
+
 	switch newPod.Status.Phase {
 	case v1.PodPending:
 		// in this state we don't know if a pod is going to be running, thus we don't need to update job map

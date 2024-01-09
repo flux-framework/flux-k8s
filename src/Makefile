@@ -1,6 +1,7 @@
 
 FLUX_SCHED_ROOT ?= /home/flux-sched
 INSTALL_PREFIX ?= /usr
+LOCALBIN ?= $(shell pwd)/bin
 COMMONENVVAR=GOOS=$(shell uname -s | tr A-Z a-z)
 
 # This is what worked
@@ -14,6 +15,10 @@ RELEASE_VERSION?=v$(shell date +%Y%m%d)-$(shell git describe --tags --match "v*"
 .PHONY: all
 all: fluxcli
 
+.PHONY: $(LOCALBIN)
+$(LOCALBIN):
+	mkdir -p $(LOCALBIN)
+
 .PHONY: fluxcli
 fluxcli: 
 	docker build -f build/scheduler/Dockerfile --build-arg ARCH="amd64" --build-arg RELEASE_VERSION="$(RELEASE_VERSION)" -t $(LOCAL_REGISTRY)/$(LOCAL_IMAGE) .
@@ -22,6 +27,12 @@ fluxcli:
 server: 
 	$(COMMONENVVAR) $(BUILDENVVAR) go build -ldflags '-w' -o bin/server cmd/main.go
 
+.PHONY: protoc
+protoc: $(LOCALBIN)
+	GOBIN=$(LOCALBIN) go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.28
+	GOBIN=$(LOCALBIN) go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2
+	
+# You can use make protoc to download proto
 .PHONY: proto
-proto:
-	protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative fluence/fluxcli-grpc/fluxcli.proto
+proto: protoc
+	PATH=$(LOCALBIN):${PATH} protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative fluence/fluxcli-grpc/fluxcli.proto

@@ -10,9 +10,9 @@ SIDECAR_IMAGE ?= fluence-sidecar:latest
 CONTROLLER_IMAGE ?= fluence-controller
 SCHEDULER_IMAGE ?= fluence
 
-.PHONY: all build build-sidecar clone prepare push push-sidecar push-controller
+.PHONY: all build build-sidecar clone update push push-sidecar push-controller
 
-all: build-sidecar prepare build update clone update
+all: prepare build-sidecar build
 
 build-sidecar: 
 	make -C ./src LOCAL_REGISTRY=${REGISTRY} LOCAL_IMAGE=${SIDECAR_IMAGE}
@@ -25,14 +25,18 @@ update: clone
 
 prepare: clone
 	# These are entirely new directory structures
+	rm -rf $(CLONE_UPSTREAM)/pkg/fluence
+	rm -rf $(CLONE_UPSTREAM)/manifests/fluence
 	cp -R sig-scheduler-plugins/pkg/fluence $(CLONE_UPSTREAM)/pkg/fluence
 	cp -R sig-scheduler-plugins/manifests/fluence $(CLONE_UPSTREAM)/manifests/fluence
+	# This is the one exception not from sig-scheduler-plugins because it is needed in both spots
+	cp -R src/fluence/fluxcli-grpc $(CLONE_UPSTREAM)/pkg/fluence/fluxcli-grpc
 	# These are files with subtle changes to add fluence
 	cp sig-scheduler-plugins/cmd/scheduler/main.go ./upstream/cmd/scheduler/main.go
 	cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/templates/deployment.yaml $(CLONE_UPSTREAM)/manifests/install/charts/as-a-second-scheduler/templates/deployment.yaml
 	cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/values.yaml $(CLONE_UPSTREAM)/manifests/install/charts/as-a-second-scheduler/values.yaml
 
-build:
+build: prepare
 	REGISTRY=${REGISTRY} IMAGE=${SCHEDULER_IMAGE} CONTROLLER_IMAGE=${CONTROLLER_IMAGE} $(BASH) $(CLONE_UPSTREAM)/hack/build-images.sh
 
 push-sidecar:

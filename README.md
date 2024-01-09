@@ -9,9 +9,47 @@ Fluence enables HPC-grade pod scheduling in Kubernetes via the [Kubernetes Sched
 For instructions on how to start Fluence on a K8s cluster, see [examples](examples/). Documentation and instructions for reproducing our CANOPIE2022 paper (citation below) can be found in the [canopie22-artifacts branch](https://github.com/flux-framework/flux-k8s/tree/canopie22-artifacts).
 For background on the Flux framework and the Fluxion scheduler, you can take a look at our award-winning R&D100 submission: https://ipo.llnl.gov/sites/default/files/2022-02/Flux_RD100_Final.pdf. For next steps:
 
+ - To understand how it works, see [Design](#design)
  - To deploy our pre-built images, go to [Deploy](#deploy)
  - To build your own images, go to [Setup](#setup)
  - To learn about repository organization, see [Developer](#developer)
+
+### Design
+
+Fluence is a custom scheduler plugin that you can specify to use with two directive in your pod spec -
+
+- Asking for `fluence` as the scheduler name
+- Defining a named group of pods with the `fluence.flux-framework.org/pod-group` label. 
+- Defining the group size with the `fluence.flux-framework.org/group-size` label. 
+
+If you are using Fluence, these values are required.
+An example is shown below for an indexed job, which will create multiple pods.
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fluence-job
+  annotations:
+    fluence.flux-framework.org/pod-group: my-pods
+    fluence.flux-framework.org/group-size: 10
+spec:
+  completions: 10
+  parallelism: 10
+  completionMode: Indexed
+  template:
+    spec:
+      schedulerName: fluence
+      containers:
+      - name: fluence-job
+        image: busybox
+        command: [echo, potato]
+      restartPolicy: Never
+  backoffLimit: 4
+```
+
+The group size might be different than, for example, your higher level abstraction (e.g., the IndexedJob) as there is no reason
+pods with different names cannot be part of the same group that needs to be scheduled together.
 
 ### Deploy
 
@@ -434,10 +472,17 @@ Finally, note that we also have a more appropriate example with jobs under [exam
 
 ### Developer
 
-You can see [deploy](#deploy) for instructions on how to do a custom deployment. If you are looking to develop:
+You can see [deploy](#deploy) for instructions on how to do a custom deployment. 
 
- - [src](src): includes source code for fluence
- - [sig-scheduler-plugins](sig-scheduler-plugins): includes assets (manifests and Go files) that are intended to be added to the kubernetes-sigs/scheduler-plugins upstream repository before build
+#### Organization
+
+If you are looking to develop:
+
+ - [src](src): includes source code for fluence. You'll find logs for this code in the `sidecar` container of the fluence pod.
+ - [sig-scheduler-plugins](sig-scheduler-plugins): includes assets (manifests and Go files) that are intended to be added to the kubernetes-sigs/scheduler-plugins upstream repository before build. You'll find logs for this container in the `scheduler-plugins-scheduler` container of the pod.
+   - [manifests](sig-scheduler-plugins/manifests): manifests for helm and Kubernetes
+   - [pkg](sig-scheduler-plugins/pkg): the main fluence module to add to upstream
+   - [cmd](sig-scheduler-plugins/cmd): the main.go to replace in upstream
  - *upstream*: the default name this upstream is cloned to when you do a make build command.
 
 Note that the clone of the repository and copying of files to the correct locations is all automated through the [Makefile](Makefile). Additional commands provided include the following:
@@ -451,6 +496,66 @@ make update
 ```
 
 It's recommend to update once in a while if you have an older clone locally and there might be changes you are not accounting for.
+
+#### GRPC
+
+The fluence module uses GRPC to communicate with Flux, and these assets are stored in [src/fluence/fluxcli-grpc](src/fluence/fluxcli-grpc).
+You should *only* update the [sig-scheduler-plugins/pkg/fluence/fluxcli-grpc/fluxcli.proto](src/fluence/fluxcli-grpc/fluxcli.proto) file,
+and then from the root run `make proto` to re-generate the other files:
+
+```bash
+cd src
+
+# Install protoc tools to local bin
+# make protoc
+make proto
+```
+
+#### Workflow
+
+The easiest thing to do is to build the containers in some container namespace that you control (meaning you can push to a registry), e.g.,:
+
+```bash
+make build REGISTRY=ghcr.io/vsoch
+```
+
+And then install with your custom images:
+
+```
+cd ./upstream/manifests/install/charts
+helm install \
+  --set scheduler.image=ghcr.io/vsoch/fluence:latest \
+  --set scheduler.sidecarimage=ghcr.io/vsoch/fluence-sidecar:latest \
+        schedscheduler-plugins as-a-second-scheduler/
+```
+
+And then apply what you need to test, and look at logs! 
+And then keep doing that until you get what you want :) Note that I haven't found a good way for the VSCode developer tools to work because we develop fluence outside of the tree it's supposed to be in.
+
+#### Components
+
+ - [FluxStateData](sig-scheduler-plugins/pkg/fluence/core/core.go): is given to the [framework.CycleState](https://github.com/kubernetes/kubernetes/blob/242b41b36a20032f99e8a059ca0a5d764105217b/pkg/scheduler/framework/cycle_state.go#L48) and serves as a vehicle to store a cache of node name assignment.
+
+
+#### Helm
+
+The install commands are shown above, but often you want to uninstall!
+
+> What is the name of the installed plugin again?
+
+```bash
+ helm list
+NAME                    NAMESPACE       REVISION        UPDATED                                 STATUS          CHART                   APP VERSION
+schedscheduler-plugins  default         1               2024-01-08 12:04:58.558612156 -0700 MST deployed        scheduler-plugins-0.27.80.27.8     
+```
+
+And then uninstall:
+
+```bash
+$ helm uninstall schedscheduler-plugins
+release "schedscheduler-plugins" uninstalled
+```
+
 
 ## Papers
 

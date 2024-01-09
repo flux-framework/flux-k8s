@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,51 +23,22 @@ import (
 	"strings"
 )
 
-type node struct {
-	Id       string       `json:"id"`
-	Label    string       `json:"label,omitempty"`
-	Metadata nodeMetadata `json:"metadata,omitempty"`
-}
+var (
+	// Defaults for nodes
+	defaultExclusive = false
+	defaultRank      = -1
+	defaultSize      = 1
+	defaultUnit      = ""
 
-type edge struct {
-	Source   string       `json:"source"`
-	Relation string       `json:"relation,omitempty"`
-	Target   string       `json:"target"`
-	Directed bool         `json:"directed,omitempty"`
-	Metadata edgeMetadata `json:"metadata"`
-}
+	// Relations
+	containsRelation = "contains"
+	inRelation       = "in"
 
-type edgeMetadata struct {
-	Name map[string]string `json:"name,omitempty"`
-}
+	// Paths
+	containmentKey = "containment"
+)
 
-type nodeMetadata struct {
-	Type       string            `json:"type"`
-	Basename   string            `json:"basename"`
-	Name       string            `json:"name"`
-	Id         int               `json:"id"`
-	Uniq_id    int               `json:"uniq_id"`
-	Rank       int               `json:"rank,omitempty"`
-	Exclusive  bool              `json:"exclusive"`
-	Unit       string            `json:"unit"`
-	Size       int               `json:"size"`
-	Paths      map[string]string `json:"paths,omitempty"`
-	Properties map[string]string `json:"properties,omitempty"`
-}
-
-type graph struct {
-	Nodes []node `json:"nodes"`
-	Edges []edge `json:"edges"`
-	//	Metadata metadata 	`json:"metadata,omitempty"`
-	Directed bool `json:"directed,omitempty"`
-}
-
-type Fluxjgf struct {
-	Graph    graph           `json:"graph"`
-	Elements int             `json:"-"`
-	NodeMap  map[string]node `json:"-"`
-}
-
+// InitJGF initializes the Flux Json Graph Format object
 func InitJGF() (fluxgraph Fluxjgf) {
 	var g graph
 	fluxgraph = Fluxjgf{
@@ -77,42 +48,49 @@ func InitJGF() (fluxgraph Fluxjgf) {
 	}
 	return
 }
+
+// getDefaultPaths returns a new map with empty containment
+// this cannot be a global shared variable or we get an error
+// about inserting an edge to itself.
+func getDefaultPaths() map[string]string {
+	return map[string]string{containmentKey: ""}
+}
+
+// addNode adds a node to the JGF
 func (g *Fluxjgf) addNode(toadd node) {
 	g.Graph.Nodes = append(g.Graph.Nodes, toadd)
 	g.NodeMap[toadd.Id] = toadd
 	g.Elements = g.Elements + 1
 }
 
+// MakeEdge creates an edge for the JGF
 func (g *Fluxjgf) MakeEdge(source string, target string, contains string) {
 	newedge := edge{
 		Source: source,
 		Target: target,
 		Metadata: edgeMetadata{
-			Name: map[string]string{
-				"containment": contains,
-			},
+			Name: map[string]string{containmentKey: contains},
 		},
 	}
 	g.Graph.Edges = append(g.Graph.Edges, newedge)
-	if contains == "contains" {
+	if contains == containsRelation {
 		tnode := g.NodeMap[target]
-		tnode.Metadata.Paths["containment"] = g.NodeMap[source].Metadata.Paths["containment"] + "/" + tnode.Metadata.Name
+		tnode.Metadata.Paths[containmentKey] = g.NodeMap[source].Metadata.Paths[containmentKey] + "/" + tnode.Metadata.Name
 	}
-
 }
 
+// processLabels selects a subset based on a string filter
 func processLabels(labels *map[string]string, filter string) (filtered map[string]string) {
-	filtered = make(map[string]string, 0)
+	filtered = map[string]string{}
 	for key, v := range *labels {
 		if strings.Contains(key, filter) {
-
 			filtered[key] = v
 		}
 	}
 	return
 }
 
-
+// MakeSubnet creates a subnet for the graph
 func (g *Fluxjgf) MakeSubnet(index int, ip string) string {
 	newnode := node{
 		Id: strconv.Itoa(g.Elements),
@@ -122,19 +100,18 @@ func (g *Fluxjgf) MakeSubnet(index int, ip string) string {
 			Name:      ip + strconv.Itoa(g.Elements),
 			Id:        index,
 			Uniq_id:   g.Elements,
-			Rank:      -1,
-			Exclusive: false,
-			Unit:      "",
-			Size:      1,
-			Paths: map[string]string{
-				"containment": "",
-			},
+			Rank:      defaultRank,
+			Exclusive: defaultExclusive,
+			Unit:      defaultUnit,
+			Size:      defaultSize,
+			Paths:     getDefaultPaths(),
 		},
 	}
 	g.addNode(newnode)
 	return newnode.Id
 }
 
+// MakeNode creates a new node for the graph
 func (g *Fluxjgf) MakeNode(index int, exclusive bool, subnet string) string {
 	newnode := node{
 		Id: strconv.Itoa(g.Elements),
@@ -144,19 +121,18 @@ func (g *Fluxjgf) MakeNode(index int, exclusive bool, subnet string) string {
 			Name:      subnet + strconv.Itoa(g.Elements),
 			Id:        g.Elements,
 			Uniq_id:   g.Elements,
-			Rank:      -1,
+			Rank:      defaultRank,
 			Exclusive: exclusive,
-			Unit:      "",
-			Size:      1,
-			Paths: map[string]string{
-				"containment": "",
-			},
+			Unit:      defaultUnit,
+			Size:      defaultSize,
+			Paths:     getDefaultPaths(),
 		},
 	}
 	g.addNode(newnode)
 	return newnode.Id
 }
 
+// MakeSocket creates a socket for the graph
 func (g *Fluxjgf) MakeSocket(index int, name string) string {
 	newnode := node{
 		Id: strconv.Itoa(g.Elements),
@@ -166,19 +142,18 @@ func (g *Fluxjgf) MakeSocket(index int, name string) string {
 			Name:      name + strconv.Itoa(index),
 			Id:        index,
 			Uniq_id:   g.Elements,
-			Rank:      -1,
-			Exclusive: false,
-			Unit:      "",
-			Size:      1,
-			Paths: map[string]string{
-				"containment": "",
-			},
+			Rank:      defaultRank,
+			Exclusive: defaultExclusive,
+			Unit:      defaultUnit,
+			Size:      defaultSize,
+			Paths:     getDefaultPaths(),
 		},
 	}
 	g.addNode(newnode)
 	return newnode.Id
 }
 
+// MakeCore creates a core for the graph
 func (g *Fluxjgf) MakeCore(index int, name string) string {
 	newnode := node{
 		Id: strconv.Itoa(g.Elements),
@@ -188,19 +163,18 @@ func (g *Fluxjgf) MakeCore(index int, name string) string {
 			Name:      name + strconv.Itoa(index),
 			Id:        index,
 			Uniq_id:   g.Elements,
-			Rank:      -1,
-			Exclusive: false,
-			Unit:      "",
-			Size:      1,
-			Paths: map[string]string{
-				"containment": "",
-			},
+			Rank:      defaultRank,
+			Exclusive: defaultExclusive,
+			Unit:      defaultUnit,
+			Size:      defaultSize,
+			Paths:     getDefaultPaths(),
 		},
 	}
 	g.addNode(newnode)
 	return newnode.Id
 }
 
+// MakeVCore makes a vcore (I think 2 vcpu == 1 cpu) for the graph
 func (g *Fluxjgf) MakeVCore(coreid string, index int, name string) string {
 	newnode := node{
 		Id: strconv.Itoa(g.Elements),
@@ -210,21 +184,20 @@ func (g *Fluxjgf) MakeVCore(coreid string, index int, name string) string {
 			Name:      name + strconv.Itoa(index),
 			Id:        index,
 			Uniq_id:   g.Elements,
-			Rank:      -1,
-			Exclusive: false,
-			Unit:      "",
-			Size:      1,
-			Paths: map[string]string{
-				"containment": "",
-			},
+			Rank:      defaultRank,
+			Exclusive: defaultExclusive,
+			Unit:      defaultUnit,
+			Size:      defaultSize,
+			Paths:     getDefaultPaths(),
 		},
 	}
 	g.addNode(newnode)
-	g.MakeEdge(coreid, newnode.Id, "contains")
-	g.MakeEdge(newnode.Id, coreid, "in")
+	g.MakeEdge(coreid, newnode.Id, containsRelation)
+	g.MakeEdge(newnode.Id, coreid, inRelation)
 	return newnode.Id
 }
 
+// MakeNFProperties makes the node feature discovery properties for the graph
 func (g *Fluxjgf) MakeNFDProperties(coreid string, index int, filter string, labels *map[string]string) {
 	for key, _ := range *labels {
 		if strings.Contains(key, filter) {
@@ -241,17 +214,15 @@ func (g *Fluxjgf) MakeNFDProperties(coreid string, index int, filter string, lab
 					Name:      name + strconv.Itoa(index),
 					Id:        index,
 					Uniq_id:   g.Elements,
-					Rank:      -1,
-					Exclusive: false,
-					Unit:      "",
-					Size:      1,
-					Paths: map[string]string{
-						"containment": "",
-					},
+					Rank:      defaultRank,
+					Exclusive: defaultExclusive,
+					Unit:      defaultUnit,
+					Size:      defaultSize,
+					Paths:     getDefaultPaths(),
 				},
 			}
 			g.addNode(newnode)
-			g.MakeEdge(coreid, newnode.Id, "contains")
+			g.MakeEdge(coreid, newnode.Id, containsRelation)
 		}
 	}
 }
@@ -269,21 +240,20 @@ func (g *Fluxjgf) MakeNFDPropertiesByValue(coreid string, index int, filter stri
 					Name:      name + strconv.Itoa(index),
 					Id:        index,
 					Uniq_id:   g.Elements,
-					Rank:      -1,
-					Exclusive: false,
-					Unit:      "",
-					Size:      1,
-					Paths: map[string]string{
-						"containment": "",
-					},
+					Rank:      defaultRank,
+					Exclusive: defaultExclusive,
+					Unit:      defaultUnit,
+					Size:      defaultSize,
+					Paths:     getDefaultPaths(),
 				},
 			}
 			g.addNode(newnode)
-			g.MakeEdge(coreid, newnode.Id, "contains")
+			g.MakeEdge(coreid, newnode.Id, containsRelation)
 		}
 	}
 }
 
+// MakeMemory creates memory for the graph
 func (g *Fluxjgf) MakeMemory(index int, name string, unit string, size int) string {
 	newnode := node{
 		Id: strconv.Itoa(g.Elements),
@@ -293,19 +263,18 @@ func (g *Fluxjgf) MakeMemory(index int, name string, unit string, size int) stri
 			Name:      name + strconv.Itoa(index),
 			Id:        index,
 			Uniq_id:   g.Elements,
-			Rank:      -1,
-			Exclusive: false,
+			Rank:      defaultRank,
+			Exclusive: defaultExclusive,
 			Unit:      unit,
 			Size:      size,
-			Paths: map[string]string{
-				"containment": "",
-			},
+			Paths:     getDefaultPaths(),
 		},
 	}
 	g.addNode(newnode)
 	return newnode.Id
 }
 
+// MakeGPU makes a gpu for the graph
 func (g *Fluxjgf) MakeGPU(index int, name string, size int) string {
 	newnode := node{
 		Id: strconv.Itoa(g.Elements),
@@ -315,19 +284,18 @@ func (g *Fluxjgf) MakeGPU(index int, name string, size int) string {
 			Name:      name + strconv.Itoa(index),
 			Id:        index,
 			Uniq_id:   g.Elements,
-			Rank:      -1,
-			Exclusive: false,
-			Unit:      "",
+			Rank:      defaultRank,
+			Exclusive: defaultExclusive,
+			Unit:      defaultUnit,
 			Size:      size,
-			Paths: map[string]string{
-				"containment": "",
-			},
+			Paths:     getDefaultPaths(),
 		},
 	}
 	g.addNode(newnode)
 	return newnode.Id
 }
 
+// MakeCluster creates the cluster
 func (g *Fluxjgf) MakeCluster(clustername string) string {
 	g.Elements = 0
 	newnode := node{
@@ -338,12 +306,12 @@ func (g *Fluxjgf) MakeCluster(clustername string) string {
 			Name:      clustername + "0",
 			Id:        g.Elements,
 			Uniq_id:   0,
-			Rank:      -1,
-			Exclusive: false,
-			Unit:      "",
-			Size:      1,
+			Rank:      defaultRank,
+			Exclusive: defaultExclusive,
+			Unit:      defaultUnit,
+			Size:      defaultSize,
 			Paths: map[string]string{
-				"containment": "/" + clustername + "0",
+				containmentKey: "/" + clustername + "0",
 			},
 		},
 	}
@@ -351,6 +319,7 @@ func (g *Fluxjgf) MakeCluster(clustername string) string {
 	return newnode.Id
 }
 
+// MakeRack makes the rack
 func (g *Fluxjgf) MakeRack(id int) string {
 	newnode := node{
 		Id: strconv.Itoa(g.Elements),
@@ -360,13 +329,11 @@ func (g *Fluxjgf) MakeRack(id int) string {
 			Name:      "rack" + strconv.Itoa(id),
 			Id:        id,
 			Uniq_id:   g.Elements,
-			Rank:      -1,
-			Exclusive: false,
-			Unit:      "",
-			Size:      1,
-			Paths: map[string]string{
-				"containment": "",
-			},
+			Rank:      defaultRank,
+			Exclusive: defaultExclusive,
+			Unit:      defaultUnit,
+			Size:      defaultSize,
+			Paths:     getDefaultPaths(),
 		},
 	}
 	g.addNode(newnode)
