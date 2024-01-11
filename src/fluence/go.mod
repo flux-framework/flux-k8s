@@ -1,6 +1,6 @@
 module github.com/flux-framework/flux-k8s/flux-plugin/fluence
 
-go 1.16
+go 1.19
 
 require (
 	github.com/flux-framework/flux-sched/resource/reapi/bindings/go v0.0.0-20231213021445-250eac78a675

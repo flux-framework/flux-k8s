@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -39,7 +39,7 @@ import (
 
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
+	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 	coschedulingcore "sigs.k8s.io/scheduler-plugins/pkg/coscheduling/core"
 	fcore "sigs.k8s.io/scheduler-plugins/pkg/fluence/core"
 	pb "sigs.k8s.io/scheduler-plugins/pkg/fluence/fluxcli-grpc"
@@ -49,6 +49,7 @@ import (
 type Fluence struct {
 	mutex          sync.Mutex
 	handle         framework.Handle
+	client         client.Client
 	podNameToJobId map[string]uint64
 	pgMgr          coschedulingcore.Manager
 
@@ -81,6 +82,7 @@ func (f *Fluence) Name() string {
 func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 
 	f := &Fluence{handle: handle, podNameToJobId: make(map[string]uint64)}
+
 	klog.Info("Create plugin")
 	ctx := context.TODO()
 	fcore.Init()
@@ -97,11 +99,14 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 	scheme := runtime.NewScheme()
 	clientscheme.AddToScheme(scheme)
 	v1.AddToScheme(scheme)
-	v1alpha1.AddToScheme(scheme)
+	sched.AddToScheme(scheme)
 	k8scli, err := client.New(handle.KubeConfig(), client.Options{Scheme: scheme})
 	if err != nil {
 		return nil, err
 	}
+
+	// Save the kubernetes client for fluence to interact with cluster objects
+	f.client = k8scli
 
 	fieldSelector, err := fields.ParseSelector(",status.phase!=" + string(v1.PodSucceeded) + ",status.phase!=" + string(v1.PodFailed))
 	if err != nil {
@@ -163,46 +168,72 @@ func (f *Fluence) getFluenceGroup(groupName string) ([]*v1.Pod, error) {
 	return pods, nil
 }
 
-// getFluenceGroupTimestamp gets the time for the earliest created fluence group pod
-// If the pod isn't in a Fluence group, we fall back it it's time
-func (f *Fluence) getFluenceGroupTimestamp(pod *v1.Pod) time.Time {
+// ensureFluenceGroup ensure that a podGroup is created for the named fluence group
+// Preference goes to the traditional PodGroup (created by the user)
+// and falls back to having one created by fluence. If there is no PodGroup
+// created and no fluence annotation, we do not create the group.
+// Likely for fluence we'd want a cleanup function somehow too,
+// for now assume groups are unique by name.
+func (f *Fluence) ensureFluenceGroup(pod *v1.Pod) string {
 
-	// This would be the "zero" equivalent of time we can check with time.isZero()
-	ts := time.Time{}
-
-	// First try to get the groupname. If no group, return pod creation timestamp
+	// Get the group name and size from the fluence labels
 	groupName := f.getFluenceGroupName(pod)
-	klog.Infof("group name is %s", groupName)
+	groupSize := f.getFluenceGroupSize(pod)
+	klog.Infof("group name for %s is %s", pod.Name, groupName)
+	klog.Infof("group size for %s is %d", pod.Name, groupSize)
+
+	// If we don't have a fluence group name, do not continue.
+	// This pod is not flagged for a group
 	if groupName == "" {
-		return ts
+		return ""
 	}
 
-	// Now query for all pods in the group
-	groupPods, err := f.getFluenceGroup(groupName)
-	if err != nil {
-		klog.Infof("get fluence group generated error: %s", err)
-		return ts
-	}
-	// Sort based on creation time
-	sort.Slice(groupPods, func(p1, p2 int) bool {
-		return groupPods[p1].CreationTimestamp.Before(&groupPods[p2].CreationTimestamp)
-	})
-
-	klog.Infof("first time: %s", groupPods[0].CreationTimestamp.Time)
-	klog.Infof("last time: %s", groupPods[len(groupPods)-1].CreationTimestamp.Time)
-	return groupPods[0].CreationTimestamp.Time
+	// Register the pod group (with the pod) in our cache
+	fcore.RegisterPodGroup(pod, groupName, groupSize)
+	return groupName
 }
 
-// getFluenceGroup looks for the group to indicate a fluence group, and returns it
+// getFluenceGroupName looks for the group to indicate a fluence group, and returns it
 func (f *Fluence) getFluenceGroupName(pod *v1.Pod) string {
 	groupName, _ := pod.Labels[PodGroupNameLabel]
 	return groupName
 }
 
+// getFluenceGroupSize gets the size of the fluence group
+func (f *Fluence) getFluenceGroupSize(pod *v1.Pod) int32 {
+	size, _ := pod.Labels[PodGroupSizeLabel]
+
+	// Default size of 1 if the label is not set (but name is)
+	if size == "" {
+		return 1
+	}
+
+	// We don't want the scheduler to fail if someone puts a value for size
+	// that doesn't convert nicely. They can find this in the logs.
+	intSize, err := strconv.ParseUint(size, 10, 32)
+	if err != nil {
+		klog.Error("Parsing integer size for pod group")
+	}
+	return int32(intSize)
+}
+
+// getCreationTimestamp first tries the fluence group, then falls back to the initial attempt timestamp
+func (f *Fluence) getCreationTimestamp(groupName string, podInfo *framework.QueuedPodInfo) *time.Time {
+	podGroup := fcore.GetPodGroup(groupName)
+
+	// IsZero is an indicator if this was actually set
+	if !podGroup.TimeCreated.IsZero() {
+		return &podGroup.TimeCreated
+	}
+	return podInfo.InitialAttemptTimestamp
+}
+
 // Less is used to sort pods in the scheduling queue in the following order.
 // 1. Compare the priorities of Pods.
-// 2. Compare the initialization timestamps of PodGroups or Pods.
-// 3. Compare the keys of PodGroups/Pods: <namespace>/<podname>.
+// 2. Compare the initialization timestamps of fluence pod groups
+// 3. Fall back, sort by namespace/name
+// See 	https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/
+// Less is part of Sort, which is the earliest we can see a pod unless we use gate
 func (f *Fluence) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
 	klog.Infof("ordering pods from Coscheduling")
 
@@ -211,106 +242,103 @@ func (f *Fluence) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
 	prio2 := corev1helpers.PodPriority(podInfo2.Pod)
 
 	// ...and only allow this to sort if they aren't the same
+	// The assumption here is that pods with priority are ignored by fluence
 	if prio1 != prio2 {
 		return prio1 > prio2
 	}
 
-	// Second priority goes to the fluence group name, which must be defined for both
-	// We select the earliest time from the created pods in the group. It's OK if not
-	// all are created because the earliest one will be.
-	// UPDATE: this approach won't work for indexed jobs that complete
-	fluenceTime1 := f.getFluenceGroupTimestamp(podInfo1.Pod)
-	fluenceTime2 := f.getFluenceGroupTimestamp(podInfo2.Pod)
-	klog.Infof("fluence time 1: %s", fluenceTime1)
-	klog.Infof("fluence time 2: %s", fluenceTime2)
+	// ensure we have a PodGroup if the pod is marked for fluence
+	podGroup1 := f.ensureFluenceGroup(podInfo1.Pod)
+	podGroup2 := f.ensureFluenceGroup(podInfo2.Pod)
 
-	// only comparable if not equal!
-	if !fluenceTime1.Equal(fluenceTime2) {
-		return fluenceTime1.Before(fluenceTime2)
-	}
+	// Fluence can only compare if we have two known groups.
+	// This tries for that first, and falls back to the initial attempt timestamp
+	creationTime1 := f.getCreationTimestamp(podGroup1, podInfo1)
+	creationTime2 := f.getCreationTimestamp(podGroup2, podInfo2)
 
-	// PodGroup is implemented in upstream but is a bit stale, but still support it if used
-	// A pod without a PodGroup returns a timestamp of 0, so we either schedule any groups first
-	creationTime1 := f.pgMgr.GetCreationTimestamp(podInfo1.Pod, *podInfo1.InitialAttemptTimestamp)
-	creationTime2 := f.pgMgr.GetCreationTimestamp(podInfo2.Pod, *podInfo2.InitialAttemptTimestamp)
-
-	// Or if they are both 0, fall back to sorting by name.
-	if creationTime1.Equal(creationTime2) {
+	// If they are the same, fall back to sorting by name.
+	if creationTime1.Equal(*creationTime2) {
 		return coschedulingcore.GetNamespacedName(podInfo1.Pod) < coschedulingcore.GetNamespacedName(podInfo2.Pod)
 	}
-	return creationTime1.Before(creationTime2)
+	return creationTime1.Before(*creationTime2)
 }
 
-// PreFilter
+// PreFilter checks info about the Pod / checks conditions that the cluster or the Pod must meet.
+// This still comes after sort
 func (f *Fluence) PreFilter(
 	ctx context.Context,
 	state *framework.CycleState,
 	pod *v1.Pod,
 ) (*framework.PreFilterResult, *framework.Status) {
 
+	var (
+		err      error
+		nodename string
+	)
 	klog.Infof("Examining the pod")
-	var err error
-	var nodename string
-	if pgname, ok := f.isGroup(ctx, pod); ok {
-		if !fcore.HaveList(pgname) {
-			klog.Infof("Getting a pod group")
-			groupSize, _ := f.groupPreFilter(ctx, pod)
-			if _, err = f.AskFlux(ctx, pod, groupSize); err != nil {
+
+	// groupName will be empty if we don't have a group
+	groupName, pg := f.getPodsGroup(pod)
+
+	if groupName != "" {
+
+		// If we don't have pods yet assigned to the group - get them from flux!
+		if !pg.HavePodList() {
+			klog.Infof("Getting listing of pods for pod group %s", groupName)
+			_, err = f.AskFlux(ctx, pod, pg.GroupSize)
+			if err != nil {
 				return nil, framework.NewStatus(framework.Unschedulable, err.Error())
 			}
 		}
-		nodename, err = fcore.GetNextNode(pgname)
-		klog.Infof("Node Selected %s (%s:%s)", nodename, pod.Name, pgname)
+
+		// Select the next available node for the allocation
+		nodename, err = fcore.GetNextNode(groupName)
+		klog.Infof("Node Selected %s (%s:%s)", nodename, pod.Name, groupName)
 		if err != nil {
 			return nil, framework.NewStatus(framework.Unschedulable, err.Error())
 		}
 	} else {
+
+		// This is the case when we don't have a group, it's a size 1 group...
+		// by its lonely self. :(
 		nodename, err = f.AskFlux(ctx, pod, 1)
 		if err != nil {
 			return nil, framework.NewStatus(framework.Unschedulable, err.Error())
 		}
 	}
 
+	// Create a fluxState (CycleState) with things that might be useful/
+	// Do we want to add the timestamp created here?
+	fluxState := fcore.NewFluxState(nodename, groupName, pg.GroupSize)
+
+	// TODO should we save more than the FluxStateData? Why not assignment, etc.?
 	klog.Info("Node Selected: ", nodename)
-	state.Write(framework.StateKey(pod.Name), &fcore.FluxStateData{NodeName: nodename})
+	state.Write(framework.StateKey(pod.Name), fluxState)
 	return nil, framework.NewStatus(framework.Success, "")
 
 }
 
-// isGroup determines if the pod belongs to a group known by fluence
-// If a flux-framework/fluence.pod-group: <size> label is not provided,
-func (f *Fluence) isGroup(ctx context.Context, pod *v1.Pod) (string, bool) {
-	pgFullName, pg := f.pgMgr.GetPodGroup(ctx, pod)
-	if pg == nil {
-		klog.InfoS("Not in group", "pod", klog.KObj(pod))
-		return "", false
+// getPodsGroup gets the pods group, if it exists.
+func (f *Fluence) getPodsGroup(pod *v1.Pod) (string, fcore.PodGroupCache) {
+	cache := fcore.PodGroupCache{}
+	groupName := f.getFluenceGroupName(pod)
+	if groupName == "" {
+		return groupName, cache
 	}
-	return pgFullName, true
+	podGroup := fcore.GetPodGroup(groupName)
+	return groupName, podGroup
 }
 
-func (f *Fluence) groupPreFilter(ctx context.Context, pod *v1.Pod) (int, error) {
-	// klog.InfoS("Flux Pre-Filter", "pod", klog.KObj(pod))
-	klog.InfoS("Flux Pre-Filter", "pod labels", pod.Labels)
-	_, pg := f.pgMgr.GetPodGroup(ctx, pod)
-	if pg == nil {
-		klog.InfoS("Not in group", "pod", klog.KObj(pod))
-		return 0, nil
-	}
-
-	klog.Info("pod group members ", pg.Spec.MinMember)
-	return int(pg.Spec.MinMember), nil
-}
-
+// TODO haven't thought about this one yet
 func (f *Fluence) Filter(ctx context.Context, cycleState *framework.CycleState, pod *v1.Pod, nodeInfo *framework.NodeInfo) *framework.Status {
 	klog.Info("Filtering input node ", nodeInfo.Node().Name)
 	if v, e := cycleState.Read(framework.StateKey(pod.Name)); e == nil {
-		if value, ok := v.(*fcore.FluxStateData); ok && value.NodeName != nodeInfo.Node().Name {
+		if value, ok := v.(*fcore.FluxStateData); ok && value.PodCache.NodeName != nodeInfo.Node().Name {
 			return framework.NewStatus(framework.Unschedulable, "pod is not permitted")
 		} else {
-			klog.Info("Filter: node selected by Flux ", value.NodeName)
+			klog.Info("Filter: node selected by Flux ", value.PodCache.NodeName)
 		}
 	}
-
 	return framework.NewStatus(framework.Success)
 }
 
@@ -318,14 +346,17 @@ func (f *Fluence) PreFilterExtensions() framework.PreFilterExtensions {
 	return nil
 }
 
-func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, count int) (string, error) {
+// AskFlux will ask flux for an allocation for the pod group.
+// TODO can we name this to better ask what we are asking for?
+func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, groupSize int32) (string, error) {
+
 	// clean up previous match if a pod has already allocated previously
 	f.mutex.Lock()
 	_, isPodAllocated := f.podNameToJobId[pod.Name]
 	f.mutex.Unlock()
 
 	if isPodAllocated {
-		klog.Info("Clean up previous allocation")
+		klog.Info("Cleaning up previous allocation for pod %s", pod.Name)
 		f.mutex.Lock()
 		f.cancelFluxJobForPod(pod.Name)
 		f.mutex.Unlock()
@@ -340,6 +371,7 @@ func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, count int) (string, 
 	}
 	defer conn.Close()
 
+	// TODO do we want to expose this timeout as a variable somewhere?
 	grpcclient := pb.NewFluxcliServiceClient(conn)
 	_, cancel := context.WithTimeout(context.Background(), 200*time.Second)
 	defer cancel()
@@ -347,29 +379,40 @@ func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, count int) (string, 
 	request := &pb.MatchRequest{
 		Ps:      jobspec,
 		Request: "allocate",
-		Count:   int32(count)}
+		Count:   groupSize,
+	}
 
-	r, err2 := grpcclient.Match(context.Background(), request)
-	if err2 != nil {
-		klog.Errorf("[FluxClient] did not receive any match response: %v", err2)
+	// Note this used to be err2 and then return err, want to double check why
+	r, err := grpcclient.Match(context.Background(), request)
+	if err != nil {
+		klog.Errorf("[FluxClient] did not receive any match response: %v", err)
 		return "", err
 	}
 
 	klog.Infof("[FluxClient] response podID %s", r.GetPodID())
 
-	_, ok := f.isGroup(ctx, pod)
-	if count > 1 || ok {
-		pgFullName, _ := f.pgMgr.GetPodGroup(ctx, pod)
-		nodelist := fcore.CreateNodePodsList(r.GetNodelist(), pgFullName)
-		klog.Infof("[FluxClient] response nodeID %s", r.GetNodelist())
-		klog.Info("[FluxClient] Parsed Nodelist ", nodelist)
+	// Presence of a podGroup is indicated by a groupName
+	groupName, _ := f.getPodsGroup(pod)
+
+	// This is the case we have a fluence group
+	if groupSize > 1 || groupName != "" {
+
+		// This was doing two calls - double check if there was reason why
+		nodeList := r.GetNodelist()
+		nodePods := fcore.CreateNodePodsList(nodeList, groupName)
+
+		klog.Infof("[FluxClient] response nodeID %s", nodeList)
+		klog.Info("[FluxClient] Parsed Nodelist ", nodePods)
 		jobid := uint64(r.GetJobID())
 
 		f.mutex.Lock()
 		f.podNameToJobId[pod.Name] = jobid
 		klog.Info("Check job set: ", f.podNameToJobId)
 		f.mutex.Unlock()
+
 	} else {
+
+		// No group in this case
 		nodename := r.GetNodelist()[0].GetNodeID()
 		jobid := uint64(r.GetJobID())
 
@@ -377,22 +420,22 @@ func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, count int) (string, 
 		f.podNameToJobId[pod.Name] = jobid
 		klog.Info("Check job set: ", f.podNameToJobId)
 		f.mutex.Unlock()
-
 		return nodename, nil
 	}
 
 	return "", nil
 }
 
+// cancelFluxJobForPod cancels the flux job for a pod.
 func (f *Fluence) cancelFluxJobForPod(podName string) error {
 	jobid := f.podNameToJobId[podName]
 
-	klog.Infof("Cancel flux job: %v for pod %s", jobid, podName)
+	klog.Infof("Cancel flux job: %d for pod %s", jobid, podName)
 
 	start := time.Now()
 
+	// connect to Flux via GRPC
 	conn, err := grpc.Dial("127.0.0.1:4242", grpc.WithInsecure())
-
 	if err != nil {
 		klog.Errorf("[FluxClient] Error connecting to server: %v", err)
 		return err
@@ -403,16 +446,16 @@ func (f *Fluence) cancelFluxJobForPod(podName string) error {
 	_, cancel := context.WithTimeout(context.Background(), 200*time.Second)
 	defer cancel()
 
-	request := &pb.CancelRequest{
-		JobID: int64(jobid),
-	}
-
+	// Prepare and make the request to the GRPC client
+	request := &pb.CancelRequest{JobID: int64(jobid)}
 	res, err := grpcclient.Cancel(context.Background(), request)
 	if err != nil {
 		klog.Errorf("[FluxClient] did not receive any cancel response: %v", err)
 		return err
 	}
 
+	// Return code 0 is a successful cancel, and we can delete the record of the job
+	// running on the pod
 	if res.Error == 0 {
 		delete(f.podNameToJobId, podName)
 	} else {
@@ -422,7 +465,8 @@ func (f *Fluence) cancelFluxJobForPod(podName string) error {
 	elapsed := metrics.SinceInSeconds(start)
 	klog.Info("Time elapsed (Cancel Job) :", elapsed)
 
-	klog.Infof("Job cancellation for pod %s result: %d", podName, err)
+	// We only make it down here if the cancel is successful
+	klog.Infof("Job cancellation for pod %s was successful", podName)
 	if klog.V(2).Enabled() {
 		klog.Info("Check job set: after delete")
 		klog.Info(f.podNameToJobId)
@@ -431,10 +475,11 @@ func (f *Fluence) cancelFluxJobForPod(podName string) error {
 }
 
 // EventHandlers
+// TODO haven't looked at this yet
 func (f *Fluence) updatePod(oldObj, newObj interface{}) {
 	// klog.Info("Update Pod event handler")
 	newPod := newObj.(*v1.Pod)
-	klog.Infof("Processing event for pod %s", newPod.Name)
+	//klog.Infof("Processing event for pod %s", newPod.Name)
 	switch newPod.Status.Phase {
 	case v1.PodPending:
 		// in this state we don't know if a pod is going to be running, thus we don't need to update job map
@@ -470,6 +515,7 @@ func (f *Fluence) updatePod(oldObj, newObj interface{}) {
 	}
 }
 
+// TODO haven't looked at this yet
 func (f *Fluence) deletePod(podObj interface{}) {
 	klog.Info("Delete Pod event handler")
 

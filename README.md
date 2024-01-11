@@ -480,6 +480,9 @@ If you are looking to develop:
 
  - [src](src): includes source code for fluence. You'll find logs for this code in the `sidecar` container of the fluence pod.
  - [sig-scheduler-plugins](sig-scheduler-plugins): includes assets (manifests and Go files) that are intended to be added to the kubernetes-sigs/scheduler-plugins upstream repository before build. You'll find logs for this container in the `scheduler-plugins-scheduler` container of the pod.
+   - [manifests](sig-scheduler-plugins/manifests): manifests for helm and Kubernetes
+   - [pkg](sig-scheduler-plugins/pkg): the main fluence module to add to upstream
+   - [cmd](sig-scheduler-plugins/cmd): the main.go to replace in upstream
  - *upstream*: the default name this upstream is cloned to when you do a make build command.
 
 Note that the clone of the repository and copying of files to the correct locations is all automated through the [Makefile](Makefile). Additional commands provided include the following:
@@ -493,6 +496,41 @@ make update
 ```
 
 It's recommend to update once in a while if you have an older clone locally and there might be changes you are not accounting for.
+
+#### GRPC
+
+The fluence module uses GRPC to communicate with Flux, and these assets are stored in [src/fluence/fluxcli-grpc](src/fluence/fluxcli-grpc).
+You should *only* update the [sig-scheduler-plugins/pkg/fluence/fluxcli-grpc/fluxcli.proto](src/fluence/fluxcli-grpc/fluxcli.proto) file,
+and then from the root run `make proto` to re-generate the other files:
+
+```bash
+cd src
+
+# Install protoc tools to local bin
+# make protoc
+make proto
+```
+
+#### Workflow
+
+The easiest thing to do is to build the containers in some container namespace that you control (meaning you can push to a registry), e.g.,:
+
+```bash
+make build REGISTRY=ghcr.io/vsoch
+```
+
+And then install with your custom images:
+
+```
+cd ./upstream/manifests/install/charts
+helm install \
+  --set scheduler.image=ghcr.io/vsoch/fluence:latest \
+  --set scheduler.sidecarimage=ghcr.io/vsoch/fluence-sidecar:latest \
+        schedscheduler-plugins as-a-second-scheduler/
+```
+
+And then apply what you need to test, and look at logs! 
+And then keep doing that until you get what you want :) Note that I haven't found a good way for the VSCode developer tools to work because we develop fluence outside of the tree it's supposed to be in.
 
 #### Components
 
