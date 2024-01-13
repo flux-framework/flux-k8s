@@ -108,8 +108,8 @@ func (s *Fluxion) Match(ctx context.Context, in *pb.MatchRequest) (*pb.MatchResp
 	reserved, allocated, at, overhead, jobid, fluxerr := s.cli.MatchAllocate(false, string(spec))
 	utils.PrintOutput(reserved, allocated, at, overhead, jobid, fluxerr)
 	fmt.Printf("[MatchRPC] Errors so far: %s\n", s.cli.GetErrMsg())
-	fmt.Printf("[GRPCServer] Flux err is %w\n", fluxerr)
 	if fluxerr != nil {
+		fmt.Printf("[GRPCServer] Flux err is %w\n", fluxerr)
 		return emptyResponse, errors.New("Error in ReapiCliMatchAllocate")
 	}
 

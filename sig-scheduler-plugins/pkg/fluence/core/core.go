@@ -23,6 +23,8 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 	pb "sigs.k8s.io/scheduler-plugins/pkg/fluence/fluxcli-grpc"
 )
@@ -33,28 +35,28 @@ import (
 // In practice I'm not sure how CycleState objects are dumped and loaded. Kueue has a dumper :P
 // https://github.com/kubernetes/enhancements/blob/master/keps/sig-scheduling/624-scheduling-framework/README.md#cyclestate
 type FluxStateData struct {
-	PodCache PodCache
+	NodeCache NodeCache
 }
 
 // Clone is required for CycleState plugins
 func (s *FluxStateData) Clone() framework.StateData {
-	return &FluxStateData{PodCache: s.PodCache}
+	return &FluxStateData{NodeCache: s.NodeCache}
 }
 
 // NewFluxState creates an entry for the CycleState with the minimum that we might need
 func NewFluxState(nodeName string, groupName string, size int32) *FluxStateData {
-	podCache := PodCache{
+	cache := NodeCache{
 		NodeName:     nodeName,
 		GroupName:    groupName,
 		MinGroupSize: size,
 	}
-	return &FluxStateData{PodCache: podCache}
+	return &FluxStateData{NodeCache: cache}
 }
 
-// PodCache holds the node name and tasks for the node
+// NodeCache holds the node name and tasks for the node
 // For the PodGroupCache, these are organized by group name,
 // and there is a list of them
-type PodCache struct {
+type NodeCache struct {
 	NodeName string
 
 	// This is derived from tasks, where
@@ -71,49 +73,59 @@ type PodCache struct {
 	GroupName    string
 }
 
-// A pod group cache holds a list of pods, where each has some number of tasks
+// A pod group cache holds a list of nodes for an allocation, where each has some number of tasks
 // along with the expected group size. This is intended to replace PodGroup
 // given the group name, size (derived from annotations) and timestamp
 type PodGroupCache struct {
 
-	// TODO need to debug that this not being a pointer isn't an issue
-	Pods []PodCache
-	Size int32
-	Name string
+	// This is a cache of nodes for pods
+	Nodes       []NodeCache
+	Size        int32
+	Name        string
+	IsAllocated bool
 
 	// Keep track of when the group was initially created!
 	// This is like, the main thing we need.
-	TimeCreated time.Time
+	TimeCreated metav1.Time
 }
 
 // Memory cache of pod group name to pod group cache, above
-var podGroupCache map[string]PodGroupCache
+var podGroupCache map[string]*PodGroupCache
 
 // Init populates the podGroupCache
 func Init() {
-	podGroupCache = map[string]PodGroupCache{}
+	podGroupCache = map[string]*PodGroupCache{}
 }
 
 // RegisterPodGroup ensures that the PodGroup exists in the cache
 // This is an experimental replacement for an actual PodGroup
+// We take a timestampo, which if called from Less (during sorting) is tiem.Time
+// if called later (an individual pod) we go for its creation timestamp
 func RegisterPodGroup(pod *v1.Pod, groupName string, groupSize int32) error {
 	entry, ok := podGroupCache[groupName]
-	if !ok {
 
-		// Important - this is a LOCAL timestamp
-		// If groups can be created across timezones (and could then be compared)
-		// this would maybe be an issue
-		creationTime := time.Now()
-		pods := []PodCache{}
+	// Always honor the earlier time
+	// Important time.Now is a LOCAL timestamp
+	// If groups can be created across timezones (and could then be compared)
+	// this would maybe be an issue
+	creationTime := metav1.NewTime(time.Now())
+	if pod.CreationTimestamp.Before(&creationTime) {
+		creationTime = pod.CreationTimestamp
+	}
+
+	if !ok {
+		nodes := []NodeCache{}
 
 		// Create the new entry for the pod group
-		entry = PodGroupCache{
+		entry = &PodGroupCache{
 			Name:        groupName,
 			Size:        groupSize,
-			Pods:        pods,
+			Nodes:       nodes,
 			TimeCreated: creationTime,
 		}
 	}
+	// Tell the user when it was created
+	klog.Infof("Pod group %s was created at %s", entry.Name, entry.TimeCreated)
 
 	// If the size has changed, we currently do not allow updating it.
 	// We issue a warning. In the future this could be supported with a grow command.
@@ -126,70 +138,88 @@ func RegisterPodGroup(pod *v1.Pod, groupName string, groupSize int32) error {
 }
 
 // GetPodGroup gets a pod group in the cache by name
-func GetPodGroup(groupName string) PodGroupCache {
+func GetPodGroup(groupName string) *PodGroupCache {
 	entry, _ := podGroupCache[groupName]
 	return entry
 }
 
+// DeletePodGroup deletes a pod from the group cache
+func DeletePodGroup(groupName string) {
+	delete(podGroupCache, groupName)
+}
+
 // CreateNodePodsList creates a list of node pod caches
-func CreateNodePodsList(nodelist []*pb.NodeAlloc, groupName string) (nodepods []PodCache) {
+func CreateNodePodsList(nodelist []*pb.NodeAlloc, groupName string) (nodepods []NodeCache) {
 
 	// Create a pod cache for each node
-	nodepods = make([]PodCache, len(nodelist))
+	nodepods = make([]NodeCache, len(nodelist))
 
 	for i, v := range nodelist {
-		nodepods[i] = PodCache{
+		nodepods[i] = NodeCache{
 			NodeName: v.GetNodeID(),
 			Tasks:    int(v.GetTasks()),
 		}
 	}
 
 	// Update the pods in the PodGraphCache
-	updatePodGroupList(groupName, nodepods)
+	updatePodGroupNodes(groupName, nodepods)
 	klog.Info("Pod Group Cache ", podGroupCache)
 	return nodepods
 }
 
-// updatePodGroupList updates the PodGroupCache with a group.
-func updatePodGroupList(groupName string, pods []PodCache) {
+// updatePodGroupList updates the PodGroupCache with a listing of nodes
+func updatePodGroupNodes(groupName string, nodes []NodeCache) {
 	group := podGroupCache[groupName]
-	group.Pods = pods
+	group.Nodes = nodes
 	podGroupCache[groupName] = group
 }
 
-// HavePodList returns true if the listing of pods is not empty
-func (p *PodGroupCache) HavePodList() bool {
-	return len(p.Pods) > 0
+// HavePodNodes returns true if the listing of pods is not empty
+// This should be all pods that are needed - the allocation will not
+// be successful otherwise, so we just check > 0
+func (p *PodGroupCache) HavePodNodes() bool {
+	return len(p.Nodes) > 0
+}
+
+// CancelAllocation resets the node cache and allocation status
+func (p *PodGroupCache) CancelAllocation() {
+	p.Nodes = []NodeCache{}
+	p.IsAllocated = false
 }
 
 // GetNextNode gets the next available node we can allocate for a group
 func GetNextNode(groupName string) (string, error) {
 	entry, ok := podGroupCache[groupName]
 
+	// This case should not happen
 	if !ok {
-		return "", fmt.Errorf("No entry for pod group %s in cache", groupName)
-	}
-	if len(entry.Pods) == 0 {
-		return "", fmt.Errorf("Error while getting a node for pod group %s", groupName)
+		return "", fmt.Errorf("no entry for pod group %s in cache", groupName)
 	}
 
-	nodename := entry.Pods[0].NodeName
+	// We don't have nodes, but we had it allocated, so we are done
+	if len(entry.Nodes) == 0 && entry.IsAllocated {
+		return "", nil
+	}
 
+	// If we aren't allocated but no nodes, likely we failed and need to try again
+	if len(entry.Nodes) == 0 && !entry.IsAllocated {
+		return "", fmt.Errorf("no nodes have been allocated for %s", groupName)
+	}
+
+	nodename := entry.Nodes[0].NodeName
+
+	// Note from Vsoch: I don't understand this logic of checking tasks
 	// I think this is saying that when we've used up all the allocations
 	// assigned for the group, we can clean it up from the pod group. We also
 	// might be able to clean it up on the Cancel function?
-	if entry.Pods[0].Tasks == 1 {
-		slice := entry.Pods[1:]
-		if len(slice) == 0 {
-			delete(podGroupCache, groupName)
-			return nodename, nil
+	if entry.Nodes[0].Tasks == 1 {
+		slice := entry.Nodes[1:]
+		if len(slice) != 0 {
+			updatePodGroupNodes(groupName, slice)
 		}
-
-		// This means there are still allocations for the group?
-		updatePodGroupList(groupName, slice)
 		return nodename, nil
 	}
 	// Why are we subtracting one here?
-	entry.Pods[0].Tasks = entry.Pods[0].Tasks - 1
+	entry.Nodes[0].Tasks = entry.Nodes[0].Tasks - 1
 	return nodename, nil
 }

@@ -146,26 +146,10 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 	return f, nil
 }
 
-// getFluenceGroup uses a selector and lister to return the group of
-// pods associated with a particular fluence label
-func (f *Fluence) getFluenceGroup(groupName string) ([]*v1.Pod, error) {
-
-	pods := []*v1.Pod{}
-
-	// Prepare a label selector
-	ls := metav1.LabelSelector{MatchLabels: map[string]string{PodGroupNameLabel: groupName}}
-
-	// Get all Pods that potentially belong to this Deployment.
-	selector, err := metav1.LabelSelectorAsSelector(&ls)
-	if err != nil {
-		return pods, err
-	}
-	pods, err = f.podLister.Pods("").List(selector)
-	if err != nil {
-		return pods, err
-	}
-	klog.Infof("Found %d pods", len(pods))
-	return pods, nil
+// getDefaultGroupName returns a group name based on the pod namespace and name
+// We do this for pods that are not labeled, and treat them as a size 1 group
+func (f *Fluence) getDefaultGroupName(pod *v1.Pod) string {
+	return fmt.Sprintf("%s-%s", pod.Namespace, pod.Name)
 }
 
 // ensureFluenceGroup ensure that a podGroup is created for the named fluence group
@@ -179,18 +163,28 @@ func (f *Fluence) ensureFluenceGroup(pod *v1.Pod) string {
 	// Get the group name and size from the fluence labels
 	groupName := f.getFluenceGroupName(pod)
 	groupSize := f.getFluenceGroupSize(pod)
+
+	// If there isn't a group, we make one based on the pod name and namespace, of size 1
+	// We do this so that we can handle them equivalently later
+	// We assume a pod with no group has a size of 1.
+	if groupName == "" {
+		groupName = f.getDefaultGroupName(pod)
+		groupSize = 1
+	}
 	klog.Infof("group name for %s is %s", pod.Name, groupName)
 	klog.Infof("group size for %s is %d", pod.Name, groupSize)
-
-	// If we don't have a fluence group name, do not continue.
-	// This pod is not flagged for a group
-	if groupName == "" {
-		return ""
-	}
 
 	// Register the pod group (with the pod) in our cache
 	fcore.RegisterPodGroup(pod, groupName, groupSize)
 	return groupName
+}
+
+// deleteFluenceGroup ensures the pod group is deleted, if it exists
+func (f *Fluence) deleteFluenceGroup(pod *v1.Pod) {
+
+	// Get the group name and size from the fluence labels
+	pg := f.getPodsGroup(pod)
+	fcore.DeletePodGroup(pg.Name)
 }
 
 // getFluenceGroupName looks for the group to indicate a fluence group, and returns it
@@ -218,14 +212,15 @@ func (f *Fluence) getFluenceGroupSize(pod *v1.Pod) int32 {
 }
 
 // getCreationTimestamp first tries the fluence group, then falls back to the initial attempt timestamp
-func (f *Fluence) getCreationTimestamp(groupName string, podInfo *framework.QueuedPodInfo) *time.Time {
-	podGroup := fcore.GetPodGroup(groupName)
+func (f *Fluence) getCreationTimestamp(groupName string, podInfo *framework.QueuedPodInfo) metav1.Time {
+	pg := fcore.GetPodGroup(groupName)
 
 	// IsZero is an indicator if this was actually set
-	if !podGroup.TimeCreated.IsZero() {
-		return &podGroup.TimeCreated
+	if !pg.TimeCreated.IsZero() {
+		klog.Infof("pod group %s was created at %s", groupName, pg.TimeCreated)
+		return pg.TimeCreated
 	}
-	return podInfo.InitialAttemptTimestamp
+	return metav1.NewTime(*podInfo.InitialAttemptTimestamp)
 }
 
 // Less is used to sort pods in the scheduling queue in the following order.
@@ -239,6 +234,11 @@ func (f *Fluence) getCreationTimestamp(groupName string, podInfo *framework.Queu
 func (f *Fluence) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
 	klog.Infof("ordering pods from Coscheduling")
 
+	// ensure we have a PodGroup no matter what
+	klog.Infof("ensuring fluence groups")
+	podGroup1 := f.ensureFluenceGroup(podInfo1.Pod)
+	podGroup2 := f.ensureFluenceGroup(podInfo2.Pod)
+
 	// First preference to priority, but only if they are different
 	prio1 := corev1helpers.PodPriority(podInfo1.Pod)
 	prio2 := corev1helpers.PodPriority(podInfo2.Pod)
@@ -249,21 +249,16 @@ func (f *Fluence) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
 		return prio1 > prio2
 	}
 
-	// ensure we have a PodGroup if the pod is marked for fluence
-	klog.Infof("ensuring fluence groups")
-	podGroup1 := f.ensureFluenceGroup(podInfo1.Pod)
-	podGroup2 := f.ensureFluenceGroup(podInfo2.Pod)
-
 	// Fluence can only compare if we have two known groups.
 	// This tries for that first, and falls back to the initial attempt timestamp
 	creationTime1 := f.getCreationTimestamp(podGroup1, podInfo1)
 	creationTime2 := f.getCreationTimestamp(podGroup2, podInfo2)
 
 	// If they are the same, fall back to sorting by name.
-	if creationTime1.Equal(*creationTime2) {
+	if creationTime1.Equal(&creationTime2) {
 		return coschedulingcore.GetNamespacedName(podInfo1.Pod) < coschedulingcore.GetNamespacedName(podInfo2.Pod)
 	}
-	return creationTime1.Before(*creationTime2)
+	return creationTime1.Before(&creationTime2)
 }
 
 // PreFilter checks info about the Pod / checks conditions that the cluster or the Pod must meet.
@@ -280,37 +275,30 @@ func (f *Fluence) PreFilter(
 	)
 	klog.Infof("Examining the pod")
 
-	// groupName will be empty if we don't have a group
+	// groupName will be named according to the single pod namespace / pod if there wasn't
+	// a user defined group. This is a size 1 group we handle equivalently.
 	pg := f.getPodsGroup(pod)
 
-	if pg.Name != "" {
+	klog.Infof("The group size %d", pg.Size)
+	klog.Infof("group name is %s", pg.Name)
 
-		klog.Infof("The group size %d", pg.Size)
-		klog.Infof("group name is %s", pg.Name)
-
-		// If we don't have pods yet assigned to the group - get them from flux!
-		if !pg.HavePodList() {
-			klog.Infof("Getting listing of pods for pod group %s", pg.Name)
-			_, err = f.AskFlux(ctx, pod, pg.Size)
-			if err != nil {
-				return nil, framework.NewStatus(framework.Unschedulable, err.Error())
-			}
-		}
-
-		// Select the next available node for the allocation
-		nodename, err = fcore.GetNextNode(pg.Name)
-		klog.Infof("Node Selected %s (%s:%s)", nodename, pod.Name, pg.Name)
+	// If we don't have nodes yet assigned to the group - get them from flux!
+	// We don't use the pod list here because it could be empty
+	if !pg.IsAllocated {
+		klog.Infof("Getting listing of pods for pod group %s", pg.Name)
+		err = f.AskFlux(ctx, pod, pg.Size)
 		if err != nil {
 			return nil, framework.NewStatus(framework.Unschedulable, err.Error())
 		}
-	} else {
+	}
 
-		// This is the case when we don't have a group, it's a size 1 group...
-		// by its lonely self. :(
-		nodename, err = f.AskFlux(ctx, pod, 1)
-		if err != nil {
-			return nil, framework.NewStatus(framework.Unschedulable, err.Error())
-		}
+	// Select the next available node for the allocation (one pod or more)
+	// This will be empty (no nodes left) and IsAllocated true if already done
+	// I don't know how we would get to this case, should watch for it
+	nodename, err = fcore.GetNextNode(pg.Name)
+	klog.Infof("Node Selected %s (%s:%s)", nodename, pod.Name, pg.Name)
+	if err != nil {
+		return nil, framework.NewStatus(framework.Unschedulable, err.Error())
 	}
 
 	// Create a fluxState (CycleState) with things that might be useful/
@@ -325,12 +313,8 @@ func (f *Fluence) PreFilter(
 }
 
 // getPodsGroup gets the pods group, if it exists.
-func (f *Fluence) getPodsGroup(pod *v1.Pod) fcore.PodGroupCache {
+func (f *Fluence) getPodsGroup(pod *v1.Pod) *fcore.PodGroupCache {
 	groupName := f.ensureFluenceGroup(pod)
-	cache := fcore.PodGroupCache{}
-	if groupName == "" {
-		return cache
-	}
 	return fcore.GetPodGroup(groupName)
 }
 
@@ -344,10 +328,10 @@ func (f *Fluence) Filter(
 
 	klog.Info("Filtering input node ", nodeInfo.Node().Name)
 	if v, e := cycleState.Read(framework.StateKey(pod.Name)); e == nil {
-		if value, ok := v.(*fcore.FluxStateData); ok && value.PodCache.NodeName != nodeInfo.Node().Name {
+		if value, ok := v.(*fcore.FluxStateData); ok && value.NodeCache.NodeName != nodeInfo.Node().Name {
 			return framework.NewStatus(framework.Unschedulable, "pod is not permitted")
 		} else {
-			klog.Info("Filter: node selected by Flux ", value.PodCache.NodeName)
+			klog.Infof("Filter: node selected by Flux %s for pod %s/%s\n", value.NodeCache.NodeName, pod.Namespace, pod.Name)
 		}
 	}
 	return framework.NewStatus(framework.Success)
@@ -359,9 +343,8 @@ func (f *Fluence) PreFilterExtensions() framework.PreFilterExtensions {
 	return nil
 }
 
-// AskFlux will ask flux for an allocation for the pod group.
-// TODO can we name this to better ask what we are asking for?
-func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, groupSize int32) (string, error) {
+// AskFlux will ask flux for an allocation for nodes for the pod group.
+func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, groupSize int32) error {
 
 	// clean up previous match if a pod has already allocated previously
 	f.mutex.Lock()
@@ -371,7 +354,7 @@ func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, groupSize int32) (st
 	if isPodAllocated {
 		klog.Info("Cleaning up previous allocation for pod %s", pod.Name)
 		f.mutex.Lock()
-		f.cancelFluxJobForPod(pod.Name)
+		f.cancelFluxJobForPod(pod)
 		f.mutex.Unlock()
 	}
 
@@ -382,7 +365,7 @@ func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, groupSize int32) (st
 
 	if err != nil {
 		klog.Errorf("[FluxClient] Error connecting to server: %v", err)
-		return "", err
+		return err
 	}
 	defer conn.Close()
 
@@ -402,50 +385,40 @@ func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, groupSize int32) (st
 	klog.Infof("[FluxClient] error %s", err)
 	if err != nil {
 		klog.Errorf("[FluxClient] did not receive any match response: %v", err)
-		return "", err
+		return err
 	}
 	klog.Infof("[FluxClient] response podID %s", r.GetPodID())
 
 	// Presence of a podGroup is indicated by a groupName
+	// Flag that the group is allocated (yes we also have the job id, testing for now)
 	pg := f.getPodsGroup(pod)
+	pg.IsAllocated = true
 
-	// This is the case we have a fluence group
-	if pg.Size > 1 || pg.Name != "" {
+	// Pod groups defined by user and standalone pods are treated the same
+	// as we create a group of size one for the latter.
+	nodeList := r.GetNodelist()
+	nodePods := fcore.CreateNodePodsList(nodeList, pg.Name)
 
-		// This was doing two calls - double check if there was reason why
-		nodeList := r.GetNodelist()
-		nodePods := fcore.CreateNodePodsList(nodeList, pg.Name)
+	klog.Infof("[FluxClient] response nodeID %s", nodeList)
+	klog.Info("[FluxClient] Parsed Nodelist ", nodePods)
+	jobid := uint64(r.GetJobID())
 
-		klog.Infof("[FluxClient] response nodeID %s", nodeList)
-		klog.Info("[FluxClient] Parsed Nodelist ", nodePods)
-		jobid := uint64(r.GetJobID())
-
-		f.mutex.Lock()
-		f.podNameToJobId[pod.Name] = jobid
-		klog.Info("Check job set: ", f.podNameToJobId)
-		f.mutex.Unlock()
-
-	} else {
-
-		// No group in this case
-		nodename := r.GetNodelist()[0].GetNodeID()
-		jobid := uint64(r.GetJobID())
-
-		f.mutex.Lock()
-		f.podNameToJobId[pod.Name] = jobid
-		klog.Info("Check job set: ", f.podNameToJobId)
-		f.mutex.Unlock()
-		return nodename, nil
-	}
-
-	return "", nil
+	f.mutex.Lock()
+	f.podNameToJobId[pod.Name] = jobid
+	klog.Info("Check job set: ", f.podNameToJobId)
+	f.mutex.Unlock()
+	return nil
 }
 
 // cancelFluxJobForPod cancels the flux job for a pod.
-func (f *Fluence) cancelFluxJobForPod(podName string) error {
-	jobid := f.podNameToJobId[podName]
+func (f *Fluence) cancelFluxJobForPod(pod *v1.Pod) error {
 
-	klog.Infof("Cancel flux job: %d for pod %s", jobid, podName)
+	// TODO should this also be indexing by namespace?
+	// I assume fluence can schedule across them?
+	jobid := f.podNameToJobId[pod.Name]
+	pg := f.getPodsGroup(pod)
+
+	klog.Infof("Cancel flux job: %d for pod %s", jobid, pod.Name)
 
 	start := time.Now()
 
@@ -470,18 +443,19 @@ func (f *Fluence) cancelFluxJobForPod(podName string) error {
 	}
 
 	// Return code 0 is a successful cancel, and we can delete the record of the job
-	// running on the pod
+	// running on the pod, and the nodes.
 	if res.Error == 0 {
-		delete(f.podNameToJobId, podName)
+		delete(f.podNameToJobId, pod.Name)
+		pg.CancelAllocation()
 	} else {
-		klog.Warningf("Failed to delete pod %s from the podname-jobid map.", podName)
+		klog.Warningf("Failed to delete pod %s from the podname-jobid map.", pod.Name)
 	}
 
 	elapsed := metrics.SinceInSeconds(start)
 	klog.Info("Time elapsed (Cancel Job) :", elapsed)
 
 	// We only make it down here if the cancel is successful
-	klog.Infof("Job cancellation for pod %s was successful", podName)
+	klog.Infof("Job cancellation for pod %s was successful", pod.Name)
 	if klog.V(2).Enabled() {
 		klog.Info("Check job set: after delete")
 		klog.Info(f.podNameToJobId)
@@ -489,12 +463,12 @@ func (f *Fluence) cancelFluxJobForPod(podName string) error {
 	return nil
 }
 
-// EventHandlers
-// TODO haven't looked at this yet
+// EventHandlers updatePod handles cleaning up resources
 func (f *Fluence) updatePod(oldObj, newObj interface{}) {
-	// klog.Info("Update Pod event handler")
+
 	newPod := newObj.(*v1.Pod)
-	//klog.Infof("Processing event for pod %s", newPod.Name)
+	klog.Infof("Processing event for pod %s", newPod)
+
 	switch newPod.Status.Phase {
 	case v1.PodPending:
 		// in this state we don't know if a pod is going to be running, thus we don't need to update job map
@@ -507,7 +481,7 @@ func (f *Fluence) updatePod(oldObj, newObj interface{}) {
 		defer f.mutex.Unlock()
 
 		if _, ok := f.podNameToJobId[newPod.Name]; ok {
-			f.cancelFluxJobForPod(newPod.Name)
+			f.cancelFluxJobForPod(newPod)
 		} else {
 			klog.Infof("Succeeded pod %s/%s doesn't have flux jobid", newPod.Namespace, newPod.Name)
 		}
@@ -519,7 +493,7 @@ func (f *Fluence) updatePod(oldObj, newObj interface{}) {
 		defer f.mutex.Unlock()
 
 		if _, ok := f.podNameToJobId[newPod.Name]; ok {
-			f.cancelFluxJobForPod(newPod.Name)
+			f.cancelFluxJobForPod(newPod)
 		} else {
 			klog.Errorf("Failed pod %s/%s doesn't have flux jobid", newPod.Namespace, newPod.Name)
 		}
@@ -530,12 +504,13 @@ func (f *Fluence) updatePod(oldObj, newObj interface{}) {
 	}
 }
 
-// TODO haven't looked at this yet
+// deletePod handles the case that the pod is deleted
+// TODO where do we put to delete the pod group? Normally it would be done way after
 func (f *Fluence) deletePod(podObj interface{}) {
 	klog.Info("Delete Pod event handler")
 
 	pod := podObj.(*v1.Pod)
-	klog.Info("Pod status: ", pod.Status.Phase)
+	klog.Infof("Pod status: %s", pod.Status.Phase)
 	switch pod.Status.Phase {
 	case v1.PodSucceeded:
 	case v1.PodPending:
@@ -545,7 +520,7 @@ func (f *Fluence) deletePod(podObj interface{}) {
 		defer f.mutex.Unlock()
 
 		if _, ok := f.podNameToJobId[pod.Name]; ok {
-			f.cancelFluxJobForPod(pod.Name)
+			f.cancelFluxJobForPod(pod)
 		} else {
 			klog.Infof("Terminating pod %s/%s doesn't have flux jobid", pod.Namespace, pod.Name)
 		}
@@ -554,7 +529,7 @@ func (f *Fluence) deletePod(podObj interface{}) {
 		defer f.mutex.Unlock()
 
 		if _, ok := f.podNameToJobId[pod.Name]; ok {
-			f.cancelFluxJobForPod(pod.Name)
+			f.cancelFluxJobForPod(pod)
 		} else {
 			klog.Infof("Deleted pod %s/%s doesn't have flux jobid", pod.Namespace, pod.Name)
 		}
