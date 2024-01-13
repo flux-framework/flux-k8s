@@ -234,6 +234,8 @@ func (f *Fluence) getCreationTimestamp(groupName string, podInfo *framework.Queu
 // 3. Fall back, sort by namespace/name
 // See 	https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/
 // Less is part of Sort, which is the earliest we can see a pod unless we use gate
+// IMPORTANT: Less sometimes is not called for smaller sizes, not sure why.
+// To get around this we call it during PreFilter too.
 func (f *Fluence) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
 	klog.Infof("ordering pods from Coscheduling")
 
@@ -248,6 +250,7 @@ func (f *Fluence) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
 	}
 
 	// ensure we have a PodGroup if the pod is marked for fluence
+	klog.Infof("ensuring fluence groups")
 	podGroup1 := f.ensureFluenceGroup(podInfo1.Pod)
 	podGroup2 := f.ensureFluenceGroup(podInfo2.Pod)
 
@@ -278,22 +281,25 @@ func (f *Fluence) PreFilter(
 	klog.Infof("Examining the pod")
 
 	// groupName will be empty if we don't have a group
-	groupName, pg := f.getPodsGroup(pod)
+	pg := f.getPodsGroup(pod)
 
-	if groupName != "" {
+	if pg.Name != "" {
+
+		klog.Infof("The group size %d", pg.Size)
+		klog.Infof("group name is %s", pg.Name)
 
 		// If we don't have pods yet assigned to the group - get them from flux!
 		if !pg.HavePodList() {
-			klog.Infof("Getting listing of pods for pod group %s", groupName)
-			_, err = f.AskFlux(ctx, pod, pg.GroupSize)
+			klog.Infof("Getting listing of pods for pod group %s", pg.Name)
+			_, err = f.AskFlux(ctx, pod, pg.Size)
 			if err != nil {
 				return nil, framework.NewStatus(framework.Unschedulable, err.Error())
 			}
 		}
 
 		// Select the next available node for the allocation
-		nodename, err = fcore.GetNextNode(groupName)
-		klog.Infof("Node Selected %s (%s:%s)", nodename, pod.Name, groupName)
+		nodename, err = fcore.GetNextNode(pg.Name)
+		klog.Infof("Node Selected %s (%s:%s)", nodename, pod.Name, pg.Name)
 		if err != nil {
 			return nil, framework.NewStatus(framework.Unschedulable, err.Error())
 		}
@@ -309,7 +315,7 @@ func (f *Fluence) PreFilter(
 
 	// Create a fluxState (CycleState) with things that might be useful/
 	// Do we want to add the timestamp created here?
-	fluxState := fcore.NewFluxState(nodename, groupName, pg.GroupSize)
+	fluxState := fcore.NewFluxState(nodename, pg.Name, pg.Size)
 
 	// TODO should we save more than the FluxStateData? Why not assignment, etc.?
 	klog.Info("Node Selected: ", nodename)
@@ -319,18 +325,23 @@ func (f *Fluence) PreFilter(
 }
 
 // getPodsGroup gets the pods group, if it exists.
-func (f *Fluence) getPodsGroup(pod *v1.Pod) (string, fcore.PodGroupCache) {
+func (f *Fluence) getPodsGroup(pod *v1.Pod) fcore.PodGroupCache {
+	groupName := f.ensureFluenceGroup(pod)
 	cache := fcore.PodGroupCache{}
-	groupName := f.getFluenceGroupName(pod)
 	if groupName == "" {
-		return groupName, cache
+		return cache
 	}
-	podGroup := fcore.GetPodGroup(groupName)
-	return groupName, podGroup
+	return fcore.GetPodGroup(groupName)
 }
 
-// TODO haven't thought about this one yet
-func (f *Fluence) Filter(ctx context.Context, cycleState *framework.CycleState, pod *v1.Pod, nodeInfo *framework.NodeInfo) *framework.Status {
+// Filter finds the node(s) where it's feasible to schedule a pod
+func (f *Fluence) Filter(
+	ctx context.Context,
+	cycleState *framework.CycleState,
+	pod *v1.Pod,
+	nodeInfo *framework.NodeInfo,
+) *framework.Status {
+
 	klog.Info("Filtering input node ", nodeInfo.Node().Name)
 	if v, e := cycleState.Read(framework.StateKey(pod.Name)); e == nil {
 		if value, ok := v.(*fcore.FluxStateData); ok && value.PodCache.NodeName != nodeInfo.Node().Name {
@@ -342,6 +353,8 @@ func (f *Fluence) Filter(ctx context.Context, cycleState *framework.CycleState, 
 	return framework.NewStatus(framework.Success)
 }
 
+// PreFilterExtensions allow for callbacks on filtered states
+// https://github.com/kubernetes/kubernetes/blob/master/pkg/scheduler/framework/interface.go#L383
 func (f *Fluence) PreFilterExtensions() framework.PreFilterExtensions {
 	return nil
 }
@@ -363,6 +376,8 @@ func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, groupSize int32) (st
 	}
 
 	jobspec := utils.InspectPodInfo(pod)
+
+	klog.Infof("[JOBSPEC]: %s", jobspec)
 	conn, err := grpc.Dial("127.0.0.1:4242", grpc.WithInsecure())
 
 	if err != nil {
@@ -384,22 +399,22 @@ func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, groupSize int32) (st
 
 	// Note this used to be err2 and then return err, want to double check why
 	r, err := grpcclient.Match(context.Background(), request)
+	klog.Infof("[FluxClient] error %s", err)
 	if err != nil {
 		klog.Errorf("[FluxClient] did not receive any match response: %v", err)
 		return "", err
 	}
-
 	klog.Infof("[FluxClient] response podID %s", r.GetPodID())
 
 	// Presence of a podGroup is indicated by a groupName
-	groupName, _ := f.getPodsGroup(pod)
+	pg := f.getPodsGroup(pod)
 
 	// This is the case we have a fluence group
-	if groupSize > 1 || groupName != "" {
+	if pg.Size > 1 || pg.Name != "" {
 
 		// This was doing two calls - double check if there was reason why
 		nodeList := r.GetNodelist()
-		nodePods := fcore.CreateNodePodsList(nodeList, groupName)
+		nodePods := fcore.CreateNodePodsList(nodeList, pg.Name)
 
 		klog.Infof("[FluxClient] response nodeID %s", nodeList)
 		klog.Info("[FluxClient] Parsed Nodelist ", nodePods)

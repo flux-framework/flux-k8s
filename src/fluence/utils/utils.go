@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	// "strings"
 	"encoding/json"
 
 	"github.com/flux-framework/flux-k8s/flux-plugin/fluence/jgf"
@@ -17,7 +16,8 @@ import (
 	resourcehelper "k8s.io/kubectl/pkg/util/resource"
 )
 
-func CreateJGF(filename string, label *string) error {
+// CreateJGF creates the Json Graph Format
+func CreateJGF(filename string, skipLabel *string) error {
 	ctx := context.Background()
 	config, err := rest.InClusterConfig()
 	if err != nil {
@@ -34,6 +34,9 @@ func CreateJGF(filename string, label *string) error {
 
 	var fluxgraph jgf.Fluxjgf
 	fluxgraph = jgf.InitJGF()
+
+	// TODO it looks like we can add more to the graph here -
+	// let's remember to consider what else we can.
 	// subnets := make(map[string]string)
 
 	cluster := fluxgraph.MakeCluster("k8scluster")
@@ -49,10 +52,14 @@ func CreateJGF(filename string, label *string) error {
 	var totalAllocCpu, totalmem int64
 	totalAllocCpu = 0
 	sdnCount := 0
+
 	for node_index, node := range nodes.Items {
+
+		// Question from V: what was this for (what is a worker)?
 		// _, worker := node.Labels["node-role.kubernetes.io/worker"]
-		if *label != "" {
-			_, fluxnode := node.Labels[*label]
+
+		if *skipLabel != "" {
+			_, fluxnode := node.Labels[*skipLabel]
 			if !fluxnode {
 				fmt.Println("Skipping node ", node.GetName())
 				continue
@@ -71,6 +78,7 @@ func CreateJGF(filename string, label *string) error {
 			if err != nil {
 				return err
 			}
+
 			// fmt.Println("Node ", node.GetName(), " has pods ", pods)
 			// Check if subnet already exists
 			// Here we build subnets according to topology.kubernetes.io/zone label
@@ -128,6 +136,9 @@ func CreateJGF(filename string, label *string) error {
 				core := fluxgraph.MakeCore(index, "core")
 				fluxgraph.MakeEdge(workernode, core, "contains") // workernode was socket
 				fluxgraph.MakeEdge(core, workernode, "in")
+
+				// Question from Vanessa:
+				// How can we get here and have vcores ever not equal to zero?
 				if vcores == 0 {
 					fluxgraph.MakeNFDProperties(core, index, "cpu-", &node.Labels)
 					// fluxgraph.MakeNFDProperties(core, index, "netmark-", &node.Labels)
@@ -190,30 +201,33 @@ type allocation struct {
 	CoreCount int
 }
 
-func ParseAllocResult(allocated string) []allocation {
+// ParseAllocResult takes an allocated (string) and parses into a list of allocation
+// We include the pod namespace/name for debugging later
+func ParseAllocResult(allocated, podName string) []allocation {
 	var dat map[string]interface{}
-	result := make([]allocation, 0)
+	result := []allocation{}
+
+	// Keep track of total core count across allocated
 	corecount := 0
+
+	// This should not happen - the string we get back should parse.
 	if err := json.Unmarshal([]byte(allocated), &dat); err != nil {
 		panic(err)
 	}
-	// fmt.Println("PRINTING DATA:\n", dat)
-	// graph := dat["graph"]
-	// fmt.Println("GET GRAPH:\n ", graph)
+
+	// Parse graph and nodes into interfaces
+	// TODO look at github.com/mitchellh/mapstructure
+	// that might make this easier
 	nodes := dat["graph"].(interface{})
 	str1 := nodes.(map[string]interface{})
-	// fmt.Println("GET NODES:\n", str1["nodes"])
 	str2 := str1["nodes"].([]interface{})
-	// fmt.Println("NODES:\n", len(str2))
+
 	for _, item := range str2 {
-		// fmt.Println("ITEM: ", item)
 		str1 = item.(map[string]interface{})
 		metadata := str1["metadata"].(map[string]interface{})
-		// fmt.Println("TYPE: ", metadata["type"])
 		if metadata["type"].(string) == "core" {
 			corecount = corecount + 1
 		}
-		// fmt.Println("BASENAME: ", metadata["basename"])
 		if metadata["type"].(string) == "node" {
 			result = append(result, allocation{
 				Type:      metadata["type"].(string),
@@ -221,18 +235,16 @@ func ParseAllocResult(allocated string) []allocation {
 				Basename:  metadata["basename"].(string),
 				CoreCount: corecount,
 			})
+
+			// Reset the corecount once we've added to a node
 			corecount = 0
-			// result.Type = metadata["type"].(string)
-			// result.Name = metadata["name"].(string)
-			// result.Basename = metadata["basename"].(string)
-			// return result
 		}
 	}
-	fmt.Println("FINAL NODE RESULT:\n", result)
+	fmt.Printf("Final node result for %s: %s\n", podName, result)
 	return result
 }
 
-// //// Utility functions
+// Utility functions
 func PrintOutput(reserved bool, allocated string, at int64, overhead float64, jobid uint64, fluxerr error) {
 	fmt.Println("\n\t----Match Allocate output---")
 	fmt.Printf("jobid: %d\nreserved: %t\nallocated: %s\nat: %d\noverhead: %f\nerror: %w\n", jobid, reserved, allocated, at, overhead, fluxerr)

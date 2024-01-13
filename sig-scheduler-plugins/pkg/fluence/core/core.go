@@ -77,9 +77,9 @@ type PodCache struct {
 type PodGroupCache struct {
 
 	// TODO need to debug that this not being a pointer isn't an issue
-	Pods      []PodCache
-	GroupSize int32
-	GroupName string
+	Pods []PodCache
+	Size int32
+	Name string
 
 	// Keep track of when the group was initially created!
 	// This is like, the main thing we need.
@@ -108,17 +108,18 @@ func RegisterPodGroup(pod *v1.Pod, groupName string, groupSize int32) error {
 
 		// Create the new entry for the pod group
 		entry = PodGroupCache{
-			GroupName:   groupName,
-			GroupSize:   groupSize,
+			Name:        groupName,
+			Size:        groupSize,
 			Pods:        pods,
 			TimeCreated: creationTime,
 		}
 	}
 
-	// If the size has changed, update it. We assume the running user might change it
-	if entry.GroupSize != groupSize {
-		klog.Warningf("Pod group %s changing size from %s to %s", groupName, entry.GroupSize, groupSize)
-		entry.GroupSize = groupSize
+	// If the size has changed, we currently do not allow updating it.
+	// We issue a warning. In the future this could be supported with a grow command.
+	if entry.Size != groupSize {
+		klog.Warningf("Pod group %s request to change size from %s to %s is not yet supported", groupName, entry.Size, groupSize)
+		// entry.GroupSize = groupSize
 	}
 	podGroupCache[groupName] = entry
 	return nil

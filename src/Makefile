@@ -12,12 +12,12 @@ LOCAL_REGISTRY=localhost:5000
 LOCAL_IMAGE=fluence-sidecar:latest
 RELEASE_VERSION?=v$(shell date +%Y%m%d)-$(shell git describe --tags --match "v*")
 
-
-$(LOCALBIN):
-	mkdir -p $(LOCALBIN)
-
 .PHONY: all
 all: fluxcli
+
+.PHONY: $(LOCALBIN)
+$(LOCALBIN):
+	mkdir -p $(LOCALBIN)
 
 .PHONY: fluxcli
 fluxcli: 
