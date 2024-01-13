@@ -132,6 +132,7 @@ WORKDIR /go/src/fluence/
 # This is the 0.31.0 tag of flux-sched (same as we install above)
 RUN go get -u github.com/flux-framework/flux-sched/resource/reapi/bindings/go/src/fluxcli@250eac78a6753253fc8353a3504d7e843d1b6b24 && \
     go mod tidy && \
+    go mod vendor && \
     make server FLUX_SCHED_ROOT=/home/flux-sched INSTALL_PREFIX=${INSTALL_PREFIX} && \
     mkdir -p /home/data/jobspecs /home/data/jgf && \
     chmod -R ugo+rwx /home/data

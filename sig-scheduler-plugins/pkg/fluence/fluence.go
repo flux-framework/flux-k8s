@@ -234,6 +234,8 @@ func (f *Fluence) getCreationTimestamp(groupName string, podInfo *framework.Queu
 // 3. Fall back, sort by namespace/name
 // See 	https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/
 // Less is part of Sort, which is the earliest we can see a pod unless we use gate
+// IMPORTANT: Less sometimes is not called for smaller sizes, not sure why.
+// To get around this we call it during PreFilter too.
 func (f *Fluence) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
 	klog.Infof("ordering pods from Coscheduling")
 
@@ -248,6 +250,7 @@ func (f *Fluence) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
 	}
 
 	// ensure we have a PodGroup if the pod is marked for fluence
+	klog.Infof("ensuring fluence groups")
 	podGroup1 := f.ensureFluenceGroup(podInfo1.Pod)
 	podGroup2 := f.ensureFluenceGroup(podInfo2.Pod)
 
@@ -281,6 +284,9 @@ func (f *Fluence) PreFilter(
 	groupName, pg := f.getPodsGroup(pod)
 
 	if groupName != "" {
+
+		klog.Infof("The group size %d", pg.GroupSize)
+		klog.Infof("group name is %s", pg.GroupName)
 
 		// If we don't have pods yet assigned to the group - get them from flux!
 		if !pg.HavePodList() {
@@ -320,8 +326,8 @@ func (f *Fluence) PreFilter(
 
 // getPodsGroup gets the pods group, if it exists.
 func (f *Fluence) getPodsGroup(pod *v1.Pod) (string, fcore.PodGroupCache) {
+	groupName := f.ensureFluenceGroup(pod)
 	cache := fcore.PodGroupCache{}
-	groupName := f.getFluenceGroupName(pod)
 	if groupName == "" {
 		return groupName, cache
 	}
@@ -363,6 +369,8 @@ func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, groupSize int32) (st
 	}
 
 	jobspec := utils.InspectPodInfo(pod)
+
+	klog.Infof("[JOBSPEC]: %s", jobspec)
 	conn, err := grpc.Dial("127.0.0.1:4242", grpc.WithInsecure())
 
 	if err != nil {
@@ -384,11 +392,11 @@ func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, groupSize int32) (st
 
 	// Note this used to be err2 and then return err, want to double check why
 	r, err := grpcclient.Match(context.Background(), request)
+	klog.Infof("[FluxClient] error %s", err)
 	if err != nil {
 		klog.Errorf("[FluxClient] did not receive any match response: %v", err)
 		return "", err
 	}
-
 	klog.Infof("[FluxClient] response podID %s", r.GetPodID())
 
 	// Presence of a podGroup is indicated by a groupName

@@ -17,6 +17,7 @@ limitations under the License.
 package utils
 
 import (
+	"fmt"
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
@@ -49,6 +50,11 @@ func InspectPodInfo(pod *v1.Pod) *pb.PodSpec {
 	// I don't think there is risk to adding an empty list but we can add
 	// the check back if there is
 	ps.Labels = getPodJobspecLabels(pod)
+
+	// Note that Container gets use for the JobSpec, so we provide
+	// the pod name (to be associated with tasks) for it. We likely
+	// should change this identifier eventually.
+	ps.Container = fmt.Sprintf("%s-%s", pod.Namespace, pod.Name)
 
 	// Create accumulated requests for cpu and limits
 	// CPU and memory are summed across containers

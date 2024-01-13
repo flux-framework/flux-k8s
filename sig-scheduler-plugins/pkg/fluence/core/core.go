@@ -115,10 +115,11 @@ func RegisterPodGroup(pod *v1.Pod, groupName string, groupSize int32) error {
 		}
 	}
 
-	// If the size has changed, update it. We assume the running user might change it
+	// If the size has changed, we currently do not allow updating it.
+	// We issue a warning. In the future this could be supported with a grow command.
 	if entry.GroupSize != groupSize {
-		klog.Warningf("Pod group %s changing size from %s to %s", groupName, entry.GroupSize, groupSize)
-		entry.GroupSize = groupSize
+		klog.Warningf("Pod group %s request to change size from %s to %s is not yet supported", groupName, entry.GroupSize, groupSize)
+		// entry.GroupSize = groupSize
 	}
 	podGroupCache[groupName] = entry
 	return nil

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	// "strings"
 	"encoding/json"
 
 	"github.com/flux-framework/flux-k8s/flux-plugin/fluence/jgf"
@@ -17,7 +16,8 @@ import (
 	resourcehelper "k8s.io/kubectl/pkg/util/resource"
 )
 
-func CreateJGF(filename string, label *string) error {
+// CreateJGF creates the Json Graph Format
+func CreateJGF(filename string, skipLabel *string) error {
 	ctx := context.Background()
 	config, err := rest.InClusterConfig()
 	if err != nil {
@@ -34,6 +34,9 @@ func CreateJGF(filename string, label *string) error {
 
 	var fluxgraph jgf.Fluxjgf
 	fluxgraph = jgf.InitJGF()
+
+	// TODO it looks like we can add more to the graph here -
+	// let's remember to consider what else we can.
 	// subnets := make(map[string]string)
 
 	cluster := fluxgraph.MakeCluster("k8scluster")
@@ -49,10 +52,14 @@ func CreateJGF(filename string, label *string) error {
 	var totalAllocCpu, totalmem int64
 	totalAllocCpu = 0
 	sdnCount := 0
+
 	for node_index, node := range nodes.Items {
+
+		// Question from V: what was this for (what is a worker)?
 		// _, worker := node.Labels["node-role.kubernetes.io/worker"]
-		if *label != "" {
-			_, fluxnode := node.Labels[*label]
+
+		if *skipLabel != "" {
+			_, fluxnode := node.Labels[*skipLabel]
 			if !fluxnode {
 				fmt.Println("Skipping node ", node.GetName())
 				continue
@@ -71,6 +78,7 @@ func CreateJGF(filename string, label *string) error {
 			if err != nil {
 				return err
 			}
+
 			// fmt.Println("Node ", node.GetName(), " has pods ", pods)
 			// Check if subnet already exists
 			// Here we build subnets according to topology.kubernetes.io/zone label
@@ -128,6 +136,9 @@ func CreateJGF(filename string, label *string) error {
 				core := fluxgraph.MakeCore(index, "core")
 				fluxgraph.MakeEdge(workernode, core, "contains") // workernode was socket
 				fluxgraph.MakeEdge(core, workernode, "in")
+
+				// Question from Vanessa:
+				// How can we get here and have vcores ever not equal to zero?
 				if vcores == 0 {
 					fluxgraph.MakeNFDProperties(core, index, "cpu-", &node.Labels)
 					// fluxgraph.MakeNFDProperties(core, index, "netmark-", &node.Labels)

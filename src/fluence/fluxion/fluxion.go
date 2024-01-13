@@ -18,6 +18,7 @@ type Fluxion struct {
 	pb.UnimplementedFluxcliServiceServer
 }
 
+// InitFluxion creates a new client to interaction with the fluxion API (via go bindings)
 func (f *Fluxion) InitFluxion(policy *string, label *string) {
 	f.cli = fluxcli.NewReapiClient()
 
@@ -44,18 +45,22 @@ func (f *Fluxion) InitFluxion(policy *string, label *string) {
 	f.cli.InitContext(string(jgf), p)
 }
 
+// Cancel wraps the Cancel function of the fluxion go bindings
 func (s *Fluxion) Cancel(ctx context.Context, in *pb.CancelRequest) (*pb.CancelResponse, error) {
+
+	// Prepare an empty cancel response (that can still be serialized)
+	emptyResponse := &pb.CancelResponse{}
+
 	fmt.Printf("[GRPCServer] Received Cancel request %v\n", in)
 	err := s.cli.Cancel(int64(in.JobID), true)
 	if err != nil {
-		return nil, errors.New("Error in Cancel")
+		return emptyResponse, errors.New("Error in Cancel")
 	}
 
 	// Why would we have an error code here if we check above?
 	// This (I think) should be an error code for the specific job
 	dr := &pb.CancelResponse{JobID: in.JobID}
 	fmt.Printf("[GRPCServer] Sending Cancel response %v\n", dr)
-
 	fmt.Printf("[CancelRPC] Errors so far: %s\n", s.cli.GetErrMsg())
 
 	reserved, at, overhead, mode, fluxerr := s.cli.Info(int64(in.JobID))
@@ -66,30 +71,56 @@ func (s *Fluxion) Cancel(ctx context.Context, in *pb.CancelRequest) (*pb.CancelR
 	return dr, nil
 }
 
-func (s *Fluxion) Match(ctx context.Context, in *pb.MatchRequest) (*pb.MatchResponse, error) {
-	filename := "/home/data/jobspecs/jobspec.yaml"
-	jobspec.CreateJobSpecYaml(in.Ps, in.Count, filename)
+// generateJobSpec generates a jobspec for a match request and returns the string
+func (s *Fluxion) generateJobspec(in *pb.MatchRequest) ([]byte, error) {
 
-	spec, err := os.ReadFile(filename)
+	spec := []byte{}
+
+	// Create a temporary file to write and read the jobspec
+	// The first parameter here as the empty string creates in /tmp
+	file, err := os.CreateTemp("", "jobspec.*.yaml")
 	if err != nil {
-		return nil, errors.New("Error reading jobspec")
+		return spec, err
+	}
+	defer os.Remove(file.Name())
+	jobspec.CreateJobSpecYaml(in.Ps, in.Count, file.Name())
+
+	spec, err = os.ReadFile(file.Name())
+	if err != nil {
+		return spec, errors.New("Error reading jobspec")
+	}
+	return spec, err
+}
+
+// Match wraps the MatchAllocate function of the fluxion go bindings
+// If a match is not possible, we return the error and an empty response
+func (s *Fluxion) Match(ctx context.Context, in *pb.MatchRequest) (*pb.MatchResponse, error) {
+
+	// Prepare an empty match response (that can still be serialized)
+	emptyResponse := &pb.MatchResponse{}
+	fmt.Printf("[GRPCServer] Received Match request %v\n", in)
+
+	// Generate the jobspec, written to temporary file and read as string
+	spec, err := s.generateJobspec(in)
+	if err != nil {
+		return emptyResponse, err
 	}
 
-	fmt.Printf("[GRPCServer] Received Match request %v\n", in)
+	// Ask flux to match allocate!
 	reserved, allocated, at, overhead, jobid, fluxerr := s.cli.MatchAllocate(false, string(spec))
 	utils.PrintOutput(reserved, allocated, at, overhead, jobid, fluxerr)
-
 	fmt.Printf("[MatchRPC] Errors so far: %s\n", s.cli.GetErrMsg())
 	if fluxerr != nil {
-		return nil, errors.New("Error in ReapiCliMatchAllocate")
+		fmt.Printf("[MatchRPC] Flux err returned non nil: %s\n", err)
+		return emptyResponse, errors.New("Error in ReapiCliMatchAllocate")
 	}
 
+	// What case is this here?
 	if allocated == "" {
-		return nil, nil
+		fmt.Print("[GRPCServer] Allocated is empty\n")
+		return emptyResponse, nil
 	}
-
 	nodetasks := utils.ParseAllocResult(allocated)
-
 	nodetaskslist := make([]*pb.NodeAlloc, len(nodetasks))
 	for i, result := range nodetasks {
 		nodetaskslist[i] = &pb.NodeAlloc{
