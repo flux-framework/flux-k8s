@@ -3,8 +3,8 @@ kind: Job
 metadata:
   name: job-1
 spec:
-  completions: 10
-  parallelism: 10
+  completions: 5
+  parallelism: 5
   completionMode: Indexed
   template:
     metadata:
