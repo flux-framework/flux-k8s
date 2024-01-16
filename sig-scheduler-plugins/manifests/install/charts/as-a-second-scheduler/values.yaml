@@ -11,6 +11,7 @@ scheduler:
   policy: lonode
   pullPolicy: Always
   sidecarPullPolicy: Always
+  loggingLevel: "9"
 
 controller:
   name: scheduler-plugins-controller

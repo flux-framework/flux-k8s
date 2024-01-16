@@ -206,6 +206,7 @@ type allocation struct {
 func ParseAllocResult(allocated, podName string) []allocation {
 	var dat map[string]interface{}
 	result := []allocation{}
+	fmt.Printf("Raw allocated response: %s\n", allocated)
 
 	// Keep track of total core count across allocated
 	corecount := 0
@@ -214,7 +215,6 @@ func ParseAllocResult(allocated, podName string) []allocation {
 	if err := json.Unmarshal([]byte(allocated), &dat); err != nil {
 		panic(err)
 	}
-
 	// Parse graph and nodes into interfaces
 	// TODO look at github.com/mitchellh/mapstructure
 	// that might make this easier
@@ -240,12 +240,23 @@ func ParseAllocResult(allocated, podName string) []allocation {
 			corecount = 0
 		}
 	}
-	fmt.Printf("Final node result for %s: %s\n", podName, result)
+	fmt.Printf("Final node result for %s\n", podName)
+	for i, alloc := range result {
+		fmt.Printf("Node %d: %s\n", i, alloc.Name)
+		fmt.Printf("  Type: %s\n  Name: %s\n  Basename: %s\n  CoreCount: %d\n",
+			alloc.Type, alloc.Name, alloc.Basename, alloc.CoreCount)
+
+	}
 	return result
 }
 
 // Utility functions
 func PrintOutput(reserved bool, allocated string, at int64, overhead float64, jobid uint64, fluxerr error) {
 	fmt.Println("\n\t----Match Allocate output---")
-	fmt.Printf("jobid: %d\nreserved: %t\nallocated: %s\nat: %d\noverhead: %f\nerror: %w\n", jobid, reserved, allocated, at, overhead, fluxerr)
+	fmt.Printf("jobid: %d\nreserved: %t\nallocated: %s\nat: %d\noverhead: %f\n", jobid, reserved, allocated, at, overhead)
+
+	// Only print error if we had one
+	if fluxerr != nil {
+		fmt.Printf("error: %w\n", fluxerr)
+	}
 }

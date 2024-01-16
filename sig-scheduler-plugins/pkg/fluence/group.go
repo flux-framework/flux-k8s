@@ -44,10 +44,11 @@ func (f *Fluence) ensureFluenceGroup(pod *v1.Pod) string {
 	// If there isn't a group, make a single node sized group
 	// This is so we can always treat the cases equally
 	if groupName == "" {
+		klog.Infof("  [Fluence] Group annotation missing for pod %s", pod.Name)
 		groupName = f.getDefaultGroupName(pod)
 	}
-	klog.Infof("group name for %s is %s", pod.Name, groupName)
-	klog.Infof("group size for %s is %d", pod.Name, groupSize)
+	klog.Infof("  [Fluence] Group name for %s is %s", pod.Name, groupName)
+	klog.Infof("  [Fluence] Group size for %s is %d", pod.Name, groupSize)
 
 	// Register the pod group (with the pod) in our cache
 	fcore.RegisterPodGroup(pod, groupName, groupSize)
@@ -81,7 +82,7 @@ func (f *Fluence) getFluenceGroupSize(pod *v1.Pod) int32 {
 	// that doesn't convert nicely. They can find this in the logs.
 	intSize, err := strconv.ParseUint(size, 10, 32)
 	if err != nil {
-		klog.Error("Parsing integer size for pod group")
+		klog.Error("  [Fluence] Parsing integer size for pod group")
 	}
 	return int32(intSize)
 }
@@ -93,9 +94,10 @@ func (f *Fluence) getCreationTimestamp(groupName string, podInfo *framework.Queu
 	// IsZero is an indicator if this was actually set
 	// If the group label was present and we have a group, this will be true
 	if !pg.TimeCreated.IsZero() {
-		klog.Infof("pod group %s was created at %s\n", groupName, pg.TimeCreated)
+		klog.Infof("  [Fluence] Pod group %s was created at %s\n", groupName, pg.TimeCreated)
 		return pg.TimeCreated
 	}
 	// We should actually never get here.
+	klog.Errorf("  [Fluence] Pod group %s time IsZero, we should not have reached here", groupName)
 	return metav1.NewMicroTime(*podInfo.InitialAttemptTimestamp)
 }

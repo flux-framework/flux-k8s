@@ -49,7 +49,7 @@ spec:
       - command:
         - /bin/kube-scheduler
         - --config=/etc/kubernetes/scheduler-config.yaml
-        - -v=9
+        - -v={{ .Values.scheduler.loggingLevel }}
         image: {{ .Values.scheduler.image }}
         imagePullPolicy: {{ .Values.scheduler.pullPolicy }}
         livenessProbe:

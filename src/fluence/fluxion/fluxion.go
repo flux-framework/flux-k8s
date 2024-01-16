@@ -96,7 +96,7 @@ func (s *Fluxion) Match(ctx context.Context, in *pb.MatchRequest) (*pb.MatchResp
 	emptyResponse := &pb.MatchResponse{}
 
 	// Prepare an empty match response (that can still be serialized)
-	fmt.Printf("[GRPCServer] Received Match request %v\n", in)
+	fmt.Printf("[Fluence][MatchRPC] Received Match request %v\n", in)
 
 	// Generate the jobspec, written to temporary file and read as string
 	spec, err := s.generateJobspec(in)
@@ -107,18 +107,25 @@ func (s *Fluxion) Match(ctx context.Context, in *pb.MatchRequest) (*pb.MatchResp
 	// Ask flux to match allocate!
 	reserved, allocated, at, overhead, jobid, fluxerr := s.cli.MatchAllocate(false, string(spec))
 	utils.PrintOutput(reserved, allocated, at, overhead, jobid, fluxerr)
-	fmt.Printf("[MatchRPC] Errors so far: %s\n", s.cli.GetErrMsg())
+
+	// Be explicit about errors (or not)
+	errorMessages := s.cli.GetErrMsg()
+	if errorMessages == "" {
+		fmt.Println("[Fluence][MatchRPC] There are no errors")
+	} else {
+		fmt.Printf("[Fluence][MatchRPC] Errors so far: %s\n", errorMessages)
+	}
 	if fluxerr != nil {
-		fmt.Printf("[GRPCServer] Flux err is %w\n", fluxerr)
-		return emptyResponse, errors.New("Error in ReapiCliMatchAllocate")
+		fmt.Printf("[Fluence][MatchRPC] Flux err is %w\n", fluxerr)
+		return emptyResponse, errors.New("[Fluence] Error in ReapiCliMatchAllocate")
 	}
 
 	// This usually means we cannot allocate
 	// We need to return an error here otherwise we try to pass an empty string
 	// to other RPC endpoints and get back an error.
 	if allocated == "" {
-		fmt.Println("[GRPCServer] Allocated is empty")
-		return emptyResponse, errors.New("allocation was not possible")
+		fmt.Println("[Fluence][MatchRPC] Allocated is empty")
+		return emptyResponse, errors.New("Allocation was not possible")
 	}
 
 	// Pass the spec name in so we can include it in the allocation result

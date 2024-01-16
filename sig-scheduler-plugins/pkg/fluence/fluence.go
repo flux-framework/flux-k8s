@@ -34,9 +34,7 @@ import (
 	corev1helpers "k8s.io/component-helpers/scheduling/corev1"
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
-	"k8s.io/kubernetes/pkg/scheduler/metrics"
 
-	corelisters "k8s.io/client-go/listers/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 	coschedulingcore "sigs.k8s.io/scheduler-plugins/pkg/coscheduling/core"
@@ -51,9 +49,6 @@ type Fluence struct {
 	client         client.Client
 	podNameToJobId map[string]uint64
 	pgMgr          coschedulingcore.Manager
-
-	// The pod group manager has a lister, but it's private
-	podLister corelisters.PodLister
 }
 
 // Name is the name of the plugin used in the Registry and configurations.
@@ -80,7 +75,6 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 
 	f := &Fluence{handle: handle, podNameToJobId: make(map[string]uint64)}
 
-	klog.Info("Create plugin")
 	ctx := context.TODO()
 	fcore.Init()
 
@@ -91,7 +85,6 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 	})
 
 	go fluxPodsInformer.Run(ctx.Done())
-	klog.Info("Create generic pod informer")
 
 	scheme := runtime.NewScheme()
 	clientscheme.AddToScheme(scheme)
@@ -136,7 +129,7 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 		return nil, err
 	}
 
-	klog.Info("Fluence start")
+	klog.Info("Fluence scheduler plugin started")
 	return f, nil
 }
 
@@ -149,10 +142,10 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 // IMPORTANT: Less sometimes is not called for smaller sizes, not sure why.
 // To get around this we call it during PreFilter too.
 func (f *Fluence) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
-	klog.Infof("ordering pods from Coscheduling")
+	klog.Infof("[Fluence] Ordering pods in Less")
 
 	// ensure we have a PodGroup no matter what
-	klog.Infof("ensuring fluence groups")
+	klog.Infof("[Fluence] Comparing %s and %s", podInfo1.Pod.Name, podInfo2.Pod.Name)
 	podGroup1 := f.ensureFluenceGroup(podInfo1.Pod)
 	podGroup2 := f.ensureFluenceGroup(podInfo2.Pod)
 
@@ -186,21 +179,22 @@ func (f *Fluence) PreFilter(
 	pod *v1.Pod,
 ) (*framework.PreFilterResult, *framework.Status) {
 
-	klog.Infof("Examining the pod")
+	klog.Infof("[Fluence] Examining pod %s", pod.Name)
 
 	// groupName will be named according to the single pod namespace / pod if there wasn't
 	// a user defined group. This is a size 1 group we handle equivalently.
 	pg := f.getPodsGroup(pod)
 
-	klog.Infof("The group size %d", pg.Size)
-	klog.Infof("group name is %s", pg.Name)
+	klog.Infof("[Fluence] Pod %s group size %d", pod.Name, pg.Size)
+	klog.Infof("[Fluence] Pod %s group name is %s", pod.Name, pg.Name)
 
 	// Note that it is always the case we have a group
 	// We have not yet derived a node list
 	if !pg.HavePodNodes() {
-		klog.Infof("Getting a pod group")
+		klog.Infof("[Fluence] Does not have nodes yet, asking Fluxion")
 		err := f.AskFlux(ctx, pod, int(pg.Size))
 		if err != nil {
+			klog.Infof("[Fluence] Fluxion returned an error %s, not schedulable", err.Error())
 			return nil, framework.NewStatus(framework.Unschedulable, err.Error())
 		}
 	}
@@ -250,17 +244,18 @@ func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, count int) error {
 	f.mutex.Unlock()
 
 	if isPodAllocated {
-		klog.Info("Clean up previous allocation")
+		klog.Info("[Fluence] Pod %s is allocated, cleaning up previous allocation", pod.Name)
 		f.mutex.Lock()
 		f.cancelFluxJobForPod(pod)
 		f.mutex.Unlock()
 	}
 
 	jobspec := utils.InspectPodInfo(pod)
+	klog.Infof("[Fluence] Inspect pod info, jobspec: %s", jobspec)
 	conn, err := grpc.Dial("127.0.0.1:4242", grpc.WithInsecure())
 
 	if err != nil {
-		klog.Errorf("[FluxClient] Error connecting to server: %v", err)
+		klog.Errorf("[Fluence] Error connecting to server: %v", err)
 		return err
 	}
 	defer conn.Close()
@@ -279,24 +274,27 @@ func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, count int) error {
 	// otherwise it's going to try to use the allocation (but there is none)
 	r, err := grpcclient.Match(context.Background(), request)
 	if err != nil {
-		klog.Errorf("[FluxClient] did not receive any match response: %v", err)
+		klog.Errorf("[Fluence] did not receive any match response: %v", err)
 		return err
 	}
 
-	klog.Infof("[FluxClient] response podID %s", r.GetPodID())
+	klog.Infof("[Fluence] response podID %s", r.GetPodID())
 
 	// Presence of a podGroup is indicated by a groupName
 	// Flag that the group is allocated (yes we also have the job id, testing for now)
 	pg := f.getPodsGroup(pod)
 
-	nodelist := fcore.CreateNodePodsList(r.GetNodelist(), pg.Name)
-	klog.Infof("[FluxClient] response nodeID %s", r.GetNodelist())
-	klog.Info("[FluxClient] Parsed Nodelist ", nodelist)
+	// Get the nodelist and inspect
+	nodes := r.GetNodelist()
+	klog.Infof("[Fluence] Nodelist returned from Fluxion: %s", nodes)
+
+	nodelist := fcore.CreateNodePodsList(nodes, pg.Name)
+	klog.Infof("[Fluence] parsed node pods list %s", nodelist)
 	jobid := uint64(r.GetJobID())
 
 	f.mutex.Lock()
 	f.podNameToJobId[pod.Name] = jobid
-	klog.Info("Check job set: ", f.podNameToJobId)
+	klog.Info("[Fluence] Check job assignment: ", f.podNameToJobId)
 	f.mutex.Unlock()
 	return nil
 }
@@ -305,14 +303,12 @@ func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, count int) error {
 func (f *Fluence) cancelFluxJobForPod(pod *v1.Pod) error {
 	jobid := f.podNameToJobId[pod.Name]
 
-	klog.Infof("Cancel flux job: %v for pod %s", jobid, pod.Name)
-
-	start := time.Now()
+	klog.Infof("[Fluence] Cancel flux job: %v for pod %s", jobid, pod.Name)
 
 	conn, err := grpc.Dial("127.0.0.1:4242", grpc.WithInsecure())
 
 	if err != nil {
-		klog.Errorf("[FluxClient] Error connecting to server: %v", err)
+		klog.Errorf("[Fluence] Error connecting to server: %v", err)
 		return err
 	}
 	defer conn.Close()
@@ -321,43 +317,36 @@ func (f *Fluence) cancelFluxJobForPod(pod *v1.Pod) error {
 	_, cancel := context.WithTimeout(context.Background(), 200*time.Second)
 	defer cancel()
 
-	request := &pb.CancelRequest{
-		JobID: int64(jobid),
-	}
-
+	// I think this error reflects the success or failure of the cancel request
+	request := &pb.CancelRequest{JobID: int64(jobid)}
 	res, err := grpcclient.Cancel(context.Background(), request)
 	if err != nil {
-		klog.Errorf("[FluxClient] did not receive any cancel response: %v", err)
+		klog.Errorf("[Fluence] did not receive any cancel response: %v", err)
 		return err
 	}
+	klog.Infof("[Fluence] Job cancellation for pod %s result: %d", pod.Name, res.Error)
 
+	// And this error is if the cancel was successful or not
 	if res.Error == 0 {
+		klog.Infof("[Fluence] Successful cancel of flux job: %v for pod %s", jobid, pod.Name)
 		delete(f.podNameToJobId, pod.Name)
+
+		// If we are successful, clear the group allocated nodes
+		pg := f.getPodsGroup(pod)
+		pg.CancelAllocation()
 	} else {
-		klog.Warningf("Failed to delete pod %s from the podname-jobid map.", pod.Name)
-	}
-
-	// If we are successful, clear the group allocated nodes
-	pg := f.getPodsGroup(pod)
-	pg.CancelAllocation()
-
-	elapsed := metrics.SinceInSeconds(start)
-	klog.Info("Time elapsed (Cancel Job) :", elapsed)
-
-	klog.Infof("Job cancellation for pod %s result: %d", pod.Name, err)
-	if klog.V(2).Enabled() {
-		klog.Info("Check job set: after delete")
-		klog.Info(f.podNameToJobId)
+		klog.Warningf("[Fluence] Failed to cancel flux job %v for pod %s", jobid, pod.Name)
 	}
 	return nil
 }
 
 // EventHandlers updatePod handles cleaning up resources
 func (f *Fluence) updatePod(oldObj, newObj interface{}) {
-	// klog.Info("Update Pod event handler")
+
+	oldPod := oldObj.(*v1.Pod)
 	newPod := newObj.(*v1.Pod)
 
-	klog.Infof("Processing event for pod %s", newPod.Name)
+	klog.Infof("[Fluence] Processing event for pod %s from %s to %s", newPod.Name, newPod.Status.Phase, oldPod.Status.Phase)
 
 	switch newPod.Status.Phase {
 	case v1.PodPending:
@@ -365,7 +354,7 @@ func (f *Fluence) updatePod(oldObj, newObj interface{}) {
 	case v1.PodRunning:
 		// if a pod is start running, we can add it state to the delta graph if it is scheduled by other scheduler
 	case v1.PodSucceeded:
-		klog.Infof("Pod %s succeeded, Fluence needs to free the resources", newPod.Name)
+		klog.Infof("[Fluence] Pod %s succeeded, Fluence needs to free the resources", newPod.Name)
 
 		f.mutex.Lock()
 		defer f.mutex.Unlock()
@@ -373,11 +362,11 @@ func (f *Fluence) updatePod(oldObj, newObj interface{}) {
 		if _, ok := f.podNameToJobId[newPod.Name]; ok {
 			f.cancelFluxJobForPod(newPod)
 		} else {
-			klog.Infof("Succeeded pod %s/%s doesn't have flux jobid", newPod.Namespace, newPod.Name)
+			klog.Infof("[Fluence] Succeeded pod %s/%s doesn't have flux jobid", newPod.Namespace, newPod.Name)
 		}
 	case v1.PodFailed:
 		// a corner case need to be tested, the pod exit code is not 0, can be created with segmentation fault pi test
-		klog.Warningf("Pod %s failed, Fluence needs to free the resources", newPod.Name)
+		klog.Warningf("[Fluence] Pod %s failed, Fluence needs to free the resources", newPod.Name)
 
 		f.mutex.Lock()
 		defer f.mutex.Unlock()
@@ -385,7 +374,7 @@ func (f *Fluence) updatePod(oldObj, newObj interface{}) {
 		if _, ok := f.podNameToJobId[newPod.Name]; ok {
 			f.cancelFluxJobForPod(newPod)
 		} else {
-			klog.Errorf("Failed pod %s/%s doesn't have flux jobid", newPod.Namespace, newPod.Name)
+			klog.Errorf("[Fluence] Failed pod %s/%s doesn't have flux jobid", newPod.Namespace, newPod.Name)
 		}
 	case v1.PodUnknown:
 		// don't know how to deal with it as it's unknown phase
@@ -400,11 +389,11 @@ func (f *Fluence) deletePod(podObj interface{}) {
 	klog.Info("Delete Pod event handler")
 
 	pod := podObj.(*v1.Pod)
-	klog.Info("Pod status: ", pod.Status.Phase)
+	klog.Infof("[Fluence] Delete pod has status %s", pod.Status.Phase)
 	switch pod.Status.Phase {
 	case v1.PodSucceeded:
 	case v1.PodPending:
-		klog.Infof("Pod %s completed and is Pending termination, Fluence needs to free the resources", pod.Name)
+		klog.Infof("[Fluence] Pod %s completed and is Pending termination, Fluence needs to free the resources", pod.Name)
 
 		f.mutex.Lock()
 		defer f.mutex.Unlock()
@@ -412,7 +401,7 @@ func (f *Fluence) deletePod(podObj interface{}) {
 		if _, ok := f.podNameToJobId[pod.Name]; ok {
 			f.cancelFluxJobForPod(pod)
 		} else {
-			klog.Infof("Terminating pod %s/%s doesn't have flux jobid", pod.Namespace, pod.Name)
+			klog.Infof("[Fluence] Terminating pod %s/%s doesn't have flux jobid", pod.Namespace, pod.Name)
 		}
 	case v1.PodRunning:
 		f.mutex.Lock()
@@ -421,7 +410,7 @@ func (f *Fluence) deletePod(podObj interface{}) {
 		if _, ok := f.podNameToJobId[pod.Name]; ok {
 			f.cancelFluxJobForPod(pod)
 		} else {
-			klog.Infof("Deleted pod %s/%s doesn't have flux jobid", pod.Namespace, pod.Name)
+			klog.Infof("[Fluence] Deleted pod %s/%s doesn't have flux jobid", pod.Namespace, pod.Name)
 		}
 	}
 }
