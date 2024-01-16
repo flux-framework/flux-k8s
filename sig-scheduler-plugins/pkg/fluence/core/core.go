@@ -126,6 +126,13 @@ func DeletePodGroup(groupName string) {
 	delete(podGroupCache, groupName)
 }
 
+// ListGroups lists groups, primarily for debugging
+func ListGroups() {
+	for name, pg := range podGroupCache {
+		fmt.Printf("                    %s: size %s, created at %s\n", name, pg.Size, &pg.TimeCreated)
+	}
+}
+
 // CreateNodePodsList creates a list of node pod caches
 func CreateNodePodsList(nodelist []*pb.NodeAlloc, groupName string) (nodepods []NodeCache) {
 

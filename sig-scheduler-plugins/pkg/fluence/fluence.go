@@ -244,18 +244,18 @@ func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, count int) error {
 	f.mutex.Unlock()
 
 	if isPodAllocated {
-		klog.Info("[Fluence] Pod %s is allocated, cleaning up previous allocation", pod.Name)
+		klog.Infof("[Fluence] Pod %s is allocated, cleaning up previous allocation\n", pod.Name)
 		f.mutex.Lock()
 		f.cancelFluxJobForPod(pod)
 		f.mutex.Unlock()
 	}
 
 	jobspec := utils.InspectPodInfo(pod)
-	klog.Infof("[Fluence] Inspect pod info, jobspec: %s", jobspec)
+	klog.Infof("[Fluence] Inspect pod info, jobspec: %s\n", jobspec)
 	conn, err := grpc.Dial("127.0.0.1:4242", grpc.WithInsecure())
 
 	if err != nil {
-		klog.Errorf("[Fluence] Error connecting to server: %v", err)
+		klog.Errorf("[Fluence] Error connecting to server: %v\n", err)
 		return err
 	}
 	defer conn.Close()
@@ -274,11 +274,11 @@ func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, count int) error {
 	// otherwise it's going to try to use the allocation (but there is none)
 	r, err := grpcclient.Match(context.Background(), request)
 	if err != nil {
-		klog.Errorf("[Fluence] did not receive any match response: %v", err)
+		klog.Errorf("[Fluence] did not receive any match response: %v\n", err)
 		return err
 	}
 
-	klog.Infof("[Fluence] response podID %s", r.GetPodID())
+	klog.Infof("[Fluence] response podID %s\n", r.GetPodID())
 
 	// Presence of a podGroup is indicated by a groupName
 	// Flag that the group is allocated (yes we also have the job id, testing for now)
@@ -286,20 +286,21 @@ func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, count int) error {
 
 	// Get the nodelist and inspect
 	nodes := r.GetNodelist()
-	klog.Infof("[Fluence] Nodelist returned from Fluxion: %s", nodes)
+	klog.Infof("[Fluence] Nodelist returned from Fluxion: %s\n", nodes)
 
 	nodelist := fcore.CreateNodePodsList(nodes, pg.Name)
-	klog.Infof("[Fluence] parsed node pods list %s", nodelist)
+	klog.Infof("[Fluence] parsed node pods list %s\n", nodelist)
 	jobid := uint64(r.GetJobID())
 
 	f.mutex.Lock()
 	f.podNameToJobId[pod.Name] = jobid
-	klog.Info("[Fluence] Check job assignment: ", f.podNameToJobId)
+	klog.Infof("[Fluence] Check job assignment: %s\n", f.podNameToJobId)
 	f.mutex.Unlock()
 	return nil
 }
 
 // cancelFluxJobForPod cancels the flux job for a pod.
+// We assume that the cancelled job also means deleting the pod group
 func (f *Fluence) cancelFluxJobForPod(pod *v1.Pod) error {
 	jobid := f.podNameToJobId[pod.Name]
 
@@ -332,8 +333,7 @@ func (f *Fluence) cancelFluxJobForPod(pod *v1.Pod) error {
 		delete(f.podNameToJobId, pod.Name)
 
 		// If we are successful, clear the group allocated nodes
-		pg := f.getPodsGroup(pod)
-		pg.CancelAllocation()
+		f.DeleteFluenceGroup(pod)
 	} else {
 		klog.Warningf("[Fluence] Failed to cancel flux job %v for pod %s", jobid, pod.Name)
 	}
@@ -386,7 +386,7 @@ func (f *Fluence) updatePod(oldObj, newObj interface{}) {
 // deletePod handles the delete event handler
 // TODO when should we clear group from the cache?
 func (f *Fluence) deletePod(podObj interface{}) {
-	klog.Info("Delete Pod event handler")
+	klog.Info("[Fluence] Delete Pod event handler")
 
 	pod := podObj.(*v1.Pod)
 	klog.Infof("[Fluence] Delete pod has status %s", pod.Status.Phase)
