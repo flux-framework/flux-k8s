@@ -44,11 +44,11 @@ func (f *Fluence) ensureFluenceGroup(pod *v1.Pod) string {
 	// If there isn't a group, make a single node sized group
 	// This is so we can always treat the cases equally
 	if groupName == "" {
-		klog.Infof("   [Fluence] Group annotation missing for pod %s", pod.Name)
+		klog.Infof("[Fluence] Group annotation missing for pod %s", pod.Name)
 		groupName = f.getDefaultGroupName(pod)
 	}
-	klog.Infof("   [Fluence] Group name for %s is %s", pod.Name, groupName)
-	klog.Infof("   [Fluence] Group size for %s is %d", pod.Name, groupSize)
+	klog.Infof("[Fluence] Group name for %s is %s", pod.Name, groupName)
+	klog.Infof("[Fluence] Group size for %s is %d", pod.Name, groupSize)
 
 	// Register the pod group (with the pod) in our cache
 	fcore.RegisterPodGroup(pod, groupName, groupSize)
@@ -60,7 +60,7 @@ func (f *Fluence) DeleteFluenceGroup(pod *v1.Pod) {
 	// Get the group name and size from the fluence labels
 	pg := f.getPodsGroup(pod)
 	fcore.DeletePodGroup(pg.Name)
-	klog.Infof("   [Fluence] known groups are:\n")
+	klog.Infof("[Fluence] known groups are:\n")
 	fcore.ListGroups()
 }
 

@@ -44,9 +44,14 @@ import (
 )
 
 type Fluence struct {
-	mutex          sync.Mutex
-	handle         framework.Handle
-	client         client.Client
+	mutex  sync.Mutex
+	handle framework.Handle
+	client client.Client
+
+	// Important: I tested moving this into the group, but it's a bad idea because
+	// we need to delete the group after the last allocation is given, and then we
+	// no longer have the ID. It might be a better approach to delete it elsewhere
+	// (but I'm not sure where that elsewhere could be)
 	podNameToJobId map[string]uint64
 	pgMgr          coschedulingcore.Manager
 }
@@ -250,6 +255,7 @@ func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, count int) error {
 		f.mutex.Unlock()
 	}
 
+	// Does the task name here matter? We are naming the entire group for the pod
 	jobspec := utils.InspectPodInfo(pod)
 	klog.Infof("[Fluence] Inspect pod info, jobspec: %s\n", jobspec)
 	conn, err := grpc.Dial("127.0.0.1:4242", grpc.WithInsecure())
@@ -413,4 +419,8 @@ func (f *Fluence) deletePod(podObj interface{}) {
 			klog.Infof("[Fluence] Deleted pod %s/%s doesn't have flux jobid", pod.Namespace, pod.Name)
 		}
 	}
+
+	// We assume that a request to delete one pod means all of them.
+	// We have to take an all or nothing approach for now
+	f.DeleteFluenceGroup(pod)
 }

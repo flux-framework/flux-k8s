@@ -206,7 +206,6 @@ type allocation struct {
 func ParseAllocResult(allocated, podName string) []allocation {
 	var dat map[string]interface{}
 	result := []allocation{}
-	fmt.Printf("Raw allocated response: %s\n", allocated)
 
 	// Keep track of total core count across allocated
 	corecount := 0

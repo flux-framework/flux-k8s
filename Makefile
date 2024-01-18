@@ -28,7 +28,6 @@ prepare: clone
 	rm -rf $(CLONE_UPSTREAM)/pkg/fluence
 	rm -rf $(CLONE_UPSTREAM)/manifests/fluence
 	cp -R sig-scheduler-plugins/pkg/fluence $(CLONE_UPSTREAM)/pkg/fluence
-	cp -R sig-scheduler-plugins/manifests/fluence $(CLONE_UPSTREAM)/manifests/fluence
 	# This is the one exception not from sig-scheduler-plugins because it is needed in both spots
 	cp -R src/fluence/fluxcli-grpc $(CLONE_UPSTREAM)/pkg/fluence/fluxcli-grpc
 	# These are files with subtle changes to add fluence

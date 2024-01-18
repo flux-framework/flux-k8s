@@ -6,6 +6,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog/v2"
 
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 	pb "sigs.k8s.io/scheduler-plugins/pkg/fluence/fluxcli-grpc"
@@ -102,13 +103,13 @@ func RegisterPodGroup(pod *v1.Pod, groupName string, groupSize int32) error {
 		}
 
 		// Tell the user when it was created
-		fmt.Printf("[Fluence] Pod group %s was created at %s\n", entry.Name, entry.TimeCreated)
+		klog.Infof("[Fluence] Pod group %s was created at %s\n", entry.Name, entry.TimeCreated)
 	}
 
 	// If the size has changed, we currently do not allow updating it.
 	// We issue a warning. In the future this could be supported with a grow command.
 	if entry.Size != groupSize {
-		fmt.Printf("[Fluence] Pod group %s request to change size from %s to %s is not yet supported\n", groupName, entry.Size, groupSize)
+		klog.Infof("[Fluence] Pod group %s request to change size from %s to %s is not yet supported\n", groupName, entry.Size, groupSize)
 		// entry.GroupSize = groupSize
 	}
 	podGroupCache[groupName] = entry
@@ -148,7 +149,7 @@ func CreateNodePodsList(nodelist []*pb.NodeAlloc, groupName string) (nodepods []
 
 	// Update the pods in the PodGraphCache
 	updatePodGroupNodes(groupName, nodepods)
-	fmt.Printf("[Fluence] Pod group cache updated with nodes\n", podGroupCache)
+	klog.Infof("[Fluence] Pod group cache updated with nodes\n", podGroupCache)
 	return nodepods
 }
 
@@ -175,30 +176,28 @@ func (p *PodGroupCache) CancelAllocation() {
 func GetNextNode(groupName string) (string, error) {
 	entry, ok := podGroupCache[groupName]
 	if !ok {
-		err := fmt.Errorf("[Fluence] Map is empty\n")
-		return "", err
+		return "", fmt.Errorf("[Fluence] Map is empty\n")
 	}
 	if len(entry.Nodes) == 0 {
-		err := fmt.Errorf("[Fluence] Error while getting a node\n")
-		return "", err
+		return "", fmt.Errorf("[Fluence] Error while getting a node\n")
 	}
 
 	nodename := entry.Nodes[0].NodeName
-	fmt.Printf("[Fluence] Next node for group %s is %s", groupName, nodename)
+	klog.Infof("[Fluence] Next node for group %s is %s", groupName, nodename)
 
 	if entry.Nodes[0].Tasks == 1 {
-		fmt.Println("[Fluence] First node has one task")
+		klog.Infof("[Fluence] First node has one task")
 		slice := entry.Nodes[1:]
 		if len(slice) == 0 {
-			fmt.Printf("[Fluence] After this node, the slice is empty, deleting group %s from cache\n", groupName)
+			klog.Infof("[Fluence] After this node, the slice is empty, deleting group %s from cache\n", groupName)
 			delete(podGroupCache, groupName)
 			return nodename, nil
 		}
-		fmt.Println("[Fluence] After this node, the slide still has nodes")
+		klog.Infof("[Fluence] After this node, the slide still has nodes")
 		updatePodGroupNodes(groupName, slice)
 		return nodename, nil
 	}
-	fmt.Println("[Fluence] Subtracting one task from first node")
+	klog.Infof("[Fluence] Subtracting one task from first node")
 	entry.Nodes[0].Tasks = entry.Nodes[0].Tasks - 1
 	return nodename, nil
 }

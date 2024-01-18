@@ -52,8 +52,9 @@ func InspectPodInfo(pod *v1.Pod) *pb.PodSpec {
 	ps.Labels = getPodJobspecLabels(pod)
 
 	// Note that Container gets use for the JobSpec, so we provide
-	// the pod name (to be associated with tasks) for it. We likely
-	// should change this identifier eventually.
+	// the pod name (to be associated with tasks) for it. We are making
+	// the assumption that this one container represents the group,
+	// which is OK for now, but might not always be true!
 	ps.Container = fmt.Sprintf("%s-%s", pod.Namespace, pod.Name)
 
 	// Create accumulated requests for cpu and limits
