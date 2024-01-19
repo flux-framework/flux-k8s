@@ -40,6 +40,7 @@ import (
 	coschedulingcore "sigs.k8s.io/scheduler-plugins/pkg/coscheduling/core"
 	fcore "sigs.k8s.io/scheduler-plugins/pkg/fluence/core"
 	pb "sigs.k8s.io/scheduler-plugins/pkg/fluence/fluxcli-grpc"
+	fgroup "sigs.k8s.io/scheduler-plugins/pkg/fluence/group"
 	"sigs.k8s.io/scheduler-plugins/pkg/fluence/utils"
 )
 
@@ -151,8 +152,8 @@ func (f *Fluence) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
 
 	// ensure we have a PodGroup no matter what
 	klog.Infof("[Fluence] Comparing %s and %s", podInfo1.Pod.Name, podInfo2.Pod.Name)
-	podGroup1 := f.ensureFluenceGroup(podInfo1.Pod)
-	podGroup2 := f.ensureFluenceGroup(podInfo2.Pod)
+	podGroup1 := fgroup.EnsureFluenceGroup(podInfo1.Pod)
+	podGroup2 := fgroup.EnsureFluenceGroup(podInfo2.Pod)
 
 	// First preference to priority, but only if they are different
 	prio1 := corev1helpers.PodPriority(podInfo1.Pod)
@@ -166,8 +167,8 @@ func (f *Fluence) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
 
 	// Fluence can only compare if we have two known groups.
 	// This tries for that first, and falls back to the initial attempt timestamp
-	creationTime1 := f.getCreationTimestamp(podGroup1, podInfo1)
-	creationTime2 := f.getCreationTimestamp(podGroup2, podInfo2)
+	creationTime1 := fgroup.GetCreationTimestamp(podGroup1, podInfo1)
+	creationTime2 := fgroup.GetCreationTimestamp(podGroup2, podInfo2)
 
 	// If they are the same, fall back to sorting by name.
 	if creationTime1.Equal(&creationTime2) {
@@ -188,7 +189,7 @@ func (f *Fluence) PreFilter(
 
 	// groupName will be named according to the single pod namespace / pod if there wasn't
 	// a user defined group. This is a size 1 group we handle equivalently.
-	pg := f.getPodsGroup(pod)
+	pg := fgroup.GetPodsGroup(pod)
 
 	klog.Infof("[Fluence] Pod %s group size %d", pod.Name, pg.Size)
 	klog.Infof("[Fluence] Pod %s group name is %s", pod.Name, pg.Name)
@@ -288,7 +289,7 @@ func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, count int) error {
 
 	// Presence of a podGroup is indicated by a groupName
 	// Flag that the group is allocated (yes we also have the job id, testing for now)
-	pg := f.getPodsGroup(pod)
+	pg := fgroup.GetPodsGroup(pod)
 
 	// Get the nodelist and inspect
 	nodes := r.GetNodelist()
@@ -339,7 +340,7 @@ func (f *Fluence) cancelFluxJobForPod(pod *v1.Pod) error {
 		delete(f.podNameToJobId, pod.Name)
 
 		// If we are successful, clear the group allocated nodes
-		f.DeleteFluenceGroup(pod)
+		fgroup.DeleteFluenceGroup(pod)
 	} else {
 		klog.Warningf("[Fluence] Failed to cancel flux job %v for pod %s", jobid, pod.Name)
 	}
@@ -422,5 +423,5 @@ func (f *Fluence) deletePod(podObj interface{}) {
 
 	// We assume that a request to delete one pod means all of them.
 	// We have to take an all or nothing approach for now
-	f.DeleteFluenceGroup(pod)
+	fgroup.DeleteFluenceGroup(pod)
 }

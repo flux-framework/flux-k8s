@@ -3,6 +3,7 @@ package fluxion
 import (
 	"os"
 
+	"github.com/flux-framework/flux-k8s/flux-plugin/fluence/defaults"
 	pb "github.com/flux-framework/flux-k8s/flux-plugin/fluence/fluxcli-grpc"
 	"github.com/flux-framework/flux-k8s/flux-plugin/fluence/jobspec"
 	"github.com/flux-framework/flux-k8s/flux-plugin/fluence/utils"
@@ -22,14 +23,13 @@ type Fluxion struct {
 func (f *Fluxion) InitFluxion(policy *string, label *string) {
 	f.cli = fluxcli.NewReapiClient()
 
-	klog.Infof("[Fluence] Created flux resource client ", f.cli)
-	filename := "/home/data/jgf/kubecluster.json"
-	err := utils.CreateJGF(filename, label)
+	klog.Infof("[Fluence] Created flux resource client %s", f.cli)
+	err := utils.CreateJGF(defaults.KubernetesJsonGraphFormat, label)
 	if err != nil {
 		return
 	}
 
-	jgf, err := os.ReadFile(filename)
+	jgf, err := os.ReadFile(defaults.KubernetesJsonGraphFormat)
 	if err != nil {
 		klog.Error("Error reading JGF")
 		return
@@ -38,7 +38,7 @@ func (f *Fluxion) InitFluxion(policy *string, label *string) {
 	p := "{}"
 	if *policy != "" {
 		p = string("{\"matcher_policy\": \"" + *policy + "\"}")
-		klog.Infof("[Fluence] match policy: ", p)
+		klog.Infof("[Fluence] match policy: %s", p)
 	}
 
 	f.cli.InitContext(string(jgf), p)

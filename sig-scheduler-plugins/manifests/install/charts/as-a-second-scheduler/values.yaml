@@ -13,6 +13,12 @@ scheduler:
   sidecarPullPolicy: Always
   loggingLevel: "9"
 
+  # Port is for GRPC, and enabling the external service will also
+  # create the service and ingress to it, along with adding
+  # additional API endpoints for our TBA kubectl plugin
+  enableExternalService: false
+  port: 4242
+
 controller:
   name: scheduler-plugins-controller
   image: registry.k8s.io/scheduler-plugins/controller:v0.27.8

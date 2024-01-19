@@ -521,7 +521,7 @@ make build REGISTRY=ghcr.io/vsoch
 
 And then install with your custom images:
 
-```
+```bash
 cd ./upstream/manifests/install/charts
 helm install \
   --set scheduler.image=ghcr.io/vsoch/fluence:latest \
@@ -531,6 +531,43 @@ helm install \
 
 And then apply what you need to test, and look at logs! 
 And then keep doing that until you get what you want :) Note that I haven't found a good way for the VSCode developer tools to work because we develop fluence outside of the tree it's supposed to be in.
+
+##### kubectl plugin
+
+Note that if you want to enable extra endpoints for the fluence kubectl plugin and expose the GRPC as a service, you can do:
+
+```bash
+helm install \
+  --set scheduler.image=ghcr.io/vsoch/fluence:latest \
+  --set scheduler.enableExternalService=true \
+  --set scheduler.sidecarimage=ghcr.io/vsoch/fluence-sidecar:latest \
+        schedscheduler-plugins as-a-second-scheduler/
+```
+
+For this setup if you are developing locally with kind, you will need to enable the ingress. Here is `kind-config.yaml`
+
+```yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+  kubeadmConfigPatches:
+  - |
+    kind: InitConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        node-labels: "ingress-ready=true"
+  extraPortMappings:
+  - containerPort: 4242
+    hostPort: 4242
+    protocol: TCP
+```
+
+And to create:
+
+```bash
+kind create cluster --config ./kind-config.yaml
+```
 
 #### Components
 

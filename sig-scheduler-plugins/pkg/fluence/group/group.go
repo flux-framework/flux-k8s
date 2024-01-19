@@ -1,4 +1,4 @@
-package fluence
+package group
 
 import (
 	"fmt"
@@ -19,13 +19,18 @@ const (
 
 // getDefaultGroupName returns a group name based on the pod namespace and name
 // We could do this for pods that are not labeled, and treat them as a size 1 group
-func (f *Fluence) getDefaultGroupName(pod *v1.Pod) string {
+func getDefaultGroupName(pod *v1.Pod) string {
 	return fmt.Sprintf("%s-%s", pod.Namespace, pod.Name)
 }
 
 // getPodsGroup gets the pods group, if it exists.
-func (f *Fluence) getPodsGroup(pod *v1.Pod) *fcore.PodGroupCache {
-	groupName := f.ensureFluenceGroup(pod)
+func GetPodsGroup(pod *v1.Pod) *fcore.PodGroupCache {
+	groupName := EnsureFluenceGroup(pod)
+	return fcore.GetPodGroup(groupName)
+}
+
+// GetGroup is a courtesy wrapper around fcore.GetPodGroup
+func GetGroup(groupName string) *fcore.PodGroupCache {
 	return fcore.GetPodGroup(groupName)
 }
 
@@ -35,17 +40,17 @@ func (f *Fluence) getPodsGroup(pod *v1.Pod) *fcore.PodGroupCache {
 // created and no fluence annotation, we do not create the group.
 // Likely for fluence we'd want a cleanup function somehow too,
 // for now assume groups are unique by name.
-func (f *Fluence) ensureFluenceGroup(pod *v1.Pod) string {
+func EnsureFluenceGroup(pod *v1.Pod) string {
 
 	// Get the group name and size from the fluence labels
-	groupName := f.getFluenceGroupName(pod)
-	groupSize := f.getFluenceGroupSize(pod)
+	groupName := getFluenceGroupName(pod)
+	groupSize := getFluenceGroupSize(pod)
 
 	// If there isn't a group, make a single node sized group
 	// This is so we can always treat the cases equally
 	if groupName == "" {
 		klog.Infof("[Fluence] Group annotation missing for pod %s", pod.Name)
-		groupName = f.getDefaultGroupName(pod)
+		groupName = getDefaultGroupName(pod)
 	}
 	klog.Infof("[Fluence] Group name for %s is %s", pod.Name, groupName)
 	klog.Infof("[Fluence] Group size for %s is %d", pod.Name, groupSize)
@@ -56,22 +61,22 @@ func (f *Fluence) ensureFluenceGroup(pod *v1.Pod) string {
 }
 
 // deleteFluenceGroup ensures the pod group is deleted, if it exists
-func (f *Fluence) DeleteFluenceGroup(pod *v1.Pod) {
+func DeleteFluenceGroup(pod *v1.Pod) {
 	// Get the group name and size from the fluence labels
-	pg := f.getPodsGroup(pod)
+	pg := GetPodsGroup(pod)
 	fcore.DeletePodGroup(pg.Name)
 	klog.Infof("[Fluence] known groups are:\n")
 	fcore.ListGroups()
 }
 
 // getFluenceGroupName looks for the group to indicate a fluence group, and returns it
-func (f *Fluence) getFluenceGroupName(pod *v1.Pod) string {
+func getFluenceGroupName(pod *v1.Pod) string {
 	groupName, _ := pod.Labels[PodGroupNameLabel]
 	return groupName
 }
 
 // getFluenceGroupSize gets the size of the fluence group
-func (f *Fluence) getFluenceGroupSize(pod *v1.Pod) int32 {
+func getFluenceGroupSize(pod *v1.Pod) int32 {
 	size, _ := pod.Labels[PodGroupSizeLabel]
 
 	// Default size of 1 if the label is not set (but name is)
@@ -88,8 +93,8 @@ func (f *Fluence) getFluenceGroupSize(pod *v1.Pod) int32 {
 	return int32(intSize)
 }
 
-// getCreationTimestamp first tries the fluence group, then falls back to the initial attempt timestamp
-func (f *Fluence) getCreationTimestamp(groupName string, podInfo *framework.QueuedPodInfo) metav1.MicroTime {
+// GetCreationTimestamp first tries the fluence group, then falls back to the initial attempt timestamp
+func GetCreationTimestamp(groupName string, podInfo *framework.QueuedPodInfo) metav1.MicroTime {
 	pg := fcore.GetPodGroup(groupName)
 
 	// IsZero is an indicator if this was actually set

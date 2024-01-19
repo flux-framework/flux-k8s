@@ -37,6 +37,7 @@ spec:
     metadata:
       labels:
         component: scheduler
+        app: fluence-scheduler
     spec:
       serviceAccountName: {{ .Values.scheduler.name }}
       containers:
@@ -45,7 +46,13 @@ spec:
         command:
         - /go/src/fluence/bin/server
         - --policy={{ .Values.scheduler.policy }}
+        - --port={{ .Values.scheduler.port }}
+        {{ if .Values.scheduler.enableExternalService }}- --external-service{{ end }}
         name: sidecar
+        # These are exposed for the kubectl plugin
+        {{ if .Values.scheduler.enableExternalService }}ports:
+          - containerPort: {{ .Values.scheduler.port }}
+            hostPort: {{ .Values.scheduler.port }}{{ end }}
       - command:
         - /bin/kube-scheduler
         - --config=/etc/kubernetes/scheduler-config.yaml
@@ -79,3 +86,32 @@ spec:
       - name: scheduler-config
         configMap:
           name: scheduler-config
+{{ if .Values.scheduler.enableExternalService }}---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fluence-service
+spec:
+  type: NodePort
+  selector:
+    app: fluence-scheduler
+  ports:
+  - port: {{ .Values.scheduler.port }}
+    targetPort: {{ .Values.scheduler.port }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fluence-ingress
+spec:
+  rules:
+  - host: localhost
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: fluence-service
+            port: 
+              number: {{ .Values.scheduler.port }}{{ end }}
