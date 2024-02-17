@@ -26,8 +26,10 @@ update: clone
 prepare: clone
 	# These are entirely new directory structures
 	rm -rf $(CLONE_UPSTREAM)/pkg/fluence
+	rm -rf $(CLONE_UPSTREAM)/pkg/controllers/podgroup_controller.go
 	rm -rf $(CLONE_UPSTREAM)/manifests/fluence
 	cp -R sig-scheduler-plugins/pkg/fluence $(CLONE_UPSTREAM)/pkg/fluence
+	cp -R sig-scheduler-plugins/pkg/controllers/* $(CLONE_UPSTREAM)/pkg/controllers/
 	# This is the one exception not from sig-scheduler-plugins because it is needed in both spots
 	cp -R src/fluence/fluxcli-grpc $(CLONE_UPSTREAM)/pkg/fluence/fluxcli-grpc
 	# These are files with subtle changes to add fluence

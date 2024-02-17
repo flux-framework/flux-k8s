@@ -2,7 +2,9 @@
 
 ![docs/images/fluence.png](docs/images/fluence.png)
 
-Fluence enables HPC-grade pod scheduling in Kubernetes via the [Kubernetes Scheduling Framework](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/). Fluence uses the directed-graph based [Fluxion scheduler](https://github.com/flux-framework/flux-sched) to map pods or [podgroups](https://github.com/kubernetes-sigs/scheduler-plugins/tree/master/pkg/coscheduling) to nodes. Fluence supports all the Fluxion scheduling algorithms (e.g., `hi`, `low`, `hinode`, etc.). Note that Fluence does not currently support use in conjunction with the kube-scheduler. Pods must all be scheduled by Fluence.
+Fluence enables HPC-grade pod scheduling in Kubernetes via the [Kubernetes Scheduling Framework](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/). Fluence uses the directed-graph based [Fluxion scheduler](https://github.com/flux-framework/flux-sched) to map pods or [podgroups](https://github.com/kubernetes-sigs/scheduler-plugins/tree/master/pkg/coscheduling) to nodes. Fluence supports all the Fluxion scheduling algorithms (e.g., `hi`, `low`, `hinode`, etc.). 
+
+**Important** Fluence does not currently support use in conjunction with the kube-scheduler. Pods must all be scheduled by Fluence, and *you should not use both schedulers in the same cluster*.
 
 ## Getting started
 
@@ -66,7 +68,8 @@ cd upstream/manifests/install/charts
 helm install \
   --set scheduler.image=ghcr.io/flux-framework/fluence:latest \
   --set scheduler.sidecarimage=ghcr.io/flux-framework/fluence-sidecar \
-    schedscheduler-plugins as-a-second-scheduler/
+  --set controller.image=ghcr.io/flux-framework/fluence-controller \
+    fluence as-a-second-scheduler/
 ```
 
 And that's it! See the [testing install](#testing-install) section for a basic example
@@ -85,17 +88,18 @@ To build and test Fluence, you will need:
 There are two images we will be building:
 
  - the scheduler sidecar: built from the repository here
- - the scheduler: built from [this branch of scheduler-plugins](https://github.com/openshift-psap/scheduler-plugins/blob/fluence/build/scheduler/Dockerfile)
+ - the scheduler: built (and modified) from [this branch of scheduler-plugins](https://github.com/openshift-psap/scheduler-plugins/blob/fluence/build/scheduler/Dockerfile)
+ - the controller: same as the scheduler
 
-#### All at once (Sidecar + Scheduler)
+#### Build All
 
-**recommended**
+**This builds the scheduler, sidecar to the scheduler, and controller**
 
 This will run the full builds for all containers in one step, which includes:
 
 1. Building the fluence sidecar from source code in [src](src)
 2. Cloning the upstream kubernetes-sigs/plugin-schedulers respository to ./upstream
-3. Building the scheduler container
+3. Building the scheduler and controller containers
 
 From the root here:
 
@@ -106,115 +110,18 @@ make
 or customize the naming of your registry or local images:
 
 ```bash
-make REGISTRY=vanessa SCHEDULER_IMAGE=fluence SIDECAR_IMAGE=fluence-sidecar
+make REGISTRY=vanessa SCHEDULER_IMAGE=fluence SIDECAR_IMAGE=fluence-sidecar CONTROLLER_IMAGE=fluence-controller
 ```
 
-As an alternative, you can do each of the steps separately or manually (detailed below).
+As an alternative, you can look at the Makefile to do each of the steps separately.
 
-<details>
-
-<summary> Manual Build Instructions </summary>
-
-#### Build Sidecar
-
-To build the plugin containers, we will basically be running `make` from the [src](src) directory. We have wrapped that for you
-in the Makefile:
-
-```bash
-make build-sidecar
-```
-
-To build for a custom registry (e.g., "vanessa' on Docker Hub):
-
-```bash
-make build-sidecar REGISTRY=vanessa
-```
-
-And specify the sidecar image name too:
-
-```bash
-make build-sidecar REGISTRY=vanessa SIDECAR_IMAGE=another-sidecar
-```
-
-The equivalent manual command is:
-
-```bash
-cd src
-make
-```
-
-Using either of the approaches above, this will create the scheduler plugin main container, which can be tagged and pushed to the preferred registry. As an example,
-here we push to the result of the build above:
-
-```bash
-docker push docker.io/vanessa/fluence-sidecar:latest
-```
-
-#### Build Scheduler
-
-Note that you can run this entire process like:
-
-```bash
-make prepare
-make build
-```
-
-Or customize the name of the scheduler image:
-
-```bash
-make prepare
-make build REGISTRY=vanessa
-```
-
-For a custom scheduler or controller image (we just need the scheduler):
-
-```bash
-make build REGISTRY=vanessa CONTROLLER_IMAGE=fluence-controller SCHEDULER_IMAGE=fluence
-```
-
-To walk through it manually, first, clone the upstream scheduler-plugins repository:
-
-```bash
-git clone https://github.com/kubernetes-sigs/scheduler-plugins ./upstream
-```
-
-We need to add our fluence package to the scheduler plugins to build. You can do that manully as follows:
-
-```bash
-# These are entirely new directory structures
-cp -R sig-scheduler-plugins/pkg/fluence ./upstream/pkg/fluence
-cp -R sig-scheduler-plugins/manifests/fluence ./upstream/manifests/fluence
-
-# These are files with subtle changes to add fluence
-cp sig-scheduler-plugins/cmd/scheduler/main.go ./upstream/cmd/scheduler/main.go
-cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/templates/deployment.yaml ./upstream/manifests/install/charts/as-a-second-scheduler/templates/deployment.yaml
-cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/values.yaml ./upstream/manifests/install/charts/as-a-second-scheduler/values.yaml
-```
-
-Then change directory to the scheduler plugins repository. 
-
-```bash
-cd ./upstream
-```
-
-And build! You'll most likely want to set a custom registry and image name again:
-
-```bash
-# This will build to localhost
-make local-image
-
-# this will build to docker.io/vanessa/fluence
-make local-image REGISTRY=vanessa CONTROLLER_IMAGE=fluence
-```
-
-</details>
-
-**Important** the make command above produces _two images_ and you want to use the first that is mentioned in the output (not the second, which is a controller).
 
 Whatever build approach you use, you'll want to push to your registry for later discovery!
 
 ```bash
 docker push docker.io/vanessa/fluence
+docker push docker.io/vanessa/fluence-sidecar
+docker push docker.io/vanessa/fluence-controller
 ```
 
 ### Prepare Cluster
@@ -268,7 +175,7 @@ scheduler:
 
 controller:
   name: scheduler-plugins-controller
-  image: registry.k8s.io/scheduler-plugins/controller:v0.27.8
+  image: ghcr.io/flux-framework/fluence-controller:latest
   replicaCount: 1
   pullPolicy: IfNotPresent
 
@@ -303,7 +210,8 @@ cd upstream/manifests/install/charts
 helm install \
   --set scheduler.image=vanessa/fluence:latest \
   --set scheduler.sidecarimage=vanessa/fluence-sidecar \
-    schedscheduler-plugins as-a-second-scheduler/
+  --set controller.image=vanessa/fluence-controller \
+    fluence as-a-second-scheduler/
 ```
 
 If you load your images into your testing environment and don't need to pull, you can change the pull policy too:
@@ -312,14 +220,15 @@ If you load your images into your testing environment and don't need to pull, yo
 helm install \
   --set scheduler.image=vanessa/fluence:latest \
   --set scheduler.sidecarimage=vanessa/fluence-sidecar \
+  --set controller.image=vanessa/fluence-controller \
   --set scheduler.sidecarPullPolicy=IfNotPresent \
-    schedscheduler-plugins as-a-second-scheduler/
+    fluence as-a-second-scheduler/
 ```
 
 If you need to uninstall (e.g., to redo something):
 
 ```bash
-helm uninstall schedscheduler-plugins
+helm uninstall fluence
 ```
 
 Next you can move down to testing the install.
@@ -519,14 +428,21 @@ The easiest thing to do is to build the containers in some container namespace t
 make build REGISTRY=ghcr.io/vsoch
 ```
 
+If needed, create a "multi node" kind cluster:
+
+```bash
+kind create cluster --config ./examples/kind-config.yaml
+```
+
 And then install with your custom images:
 
 ```bash
 cd ./upstream/manifests/install/charts
 helm install \
   --set scheduler.image=ghcr.io/vsoch/fluence:latest \
+  --set controller.image=ghcr.io/vsoch/fluence-controller:latest \
   --set scheduler.sidecarimage=ghcr.io/vsoch/fluence-sidecar:latest \
-        schedscheduler-plugins as-a-second-scheduler/
+        fluence as-a-second-scheduler/
 ```
 
 And then apply what you need to test, and look at logs! 
@@ -540,8 +456,9 @@ Note that if you want to enable extra endpoints for the fluence kubectl plugin a
 helm install \
   --set scheduler.image=ghcr.io/vsoch/fluence:latest \
   --set scheduler.enableExternalService=true \
+  --set controller.image=vanessa/fluence-controller \
   --set scheduler.sidecarimage=ghcr.io/vsoch/fluence-sidecar:latest \
-        schedscheduler-plugins as-a-second-scheduler/
+        fluence as-a-second-scheduler/
 ```
 
 For this setup if you are developing locally with kind, you will need to enable the ingress. Here is `kind-config.yaml`
@@ -569,6 +486,30 @@ And to create:
 kind create cluster --config ./kind-config.yaml
 ```
 
+#### Vanessa Thinking
+
+> Updated February 15, 2024
+
+What I think might be happening (and not always, sometimes)
+
+- New pod group, no node list
+- Fluence assigns nodes
+- Nodes get assigned to pods 1:1
+- POD group is deleted
+- Some pod is sent back to queue (kubelet rejects, etc)
+- POD group does not exist and is recreated, no node list
+- Fluence asks again, but still has the first job. Not enough resources, asks forever.
+
+The above would not happen with the persistent pod group (if it wasn't cleaned up until the deletion of the job) and wouldn't happen if there are just enough resources to account for the overlap.
+
+- Does Fluence allocate resources for itself?
+- It would be nice to be able to inspect the state of Fluence.
+- At some point we want to be using the TBA fluxion-go instead of the one off branch we currently have (but we don't need to be blocked for that)
+- We should (I think) restore pod group (it's in the controller here) and have our own container built. That way we have total control over the custom resource, and we don't risk it going away.
+  - As a part of that, we can add add a mutating webhook that emulates what we are doing in fluence now to find the label, but instead we will create the CRD to hold state instead of trying to hold in the operator.
+- It could then also be investigated that we can more flexibly change the size of the group, within some min/max size (also determined by labels?) to help with scheduling.
+- Note that kueue has added a Pod Group object, so probably addresses the static case here.
+
 #### Components
 
  - [FluxStateData](sig-scheduler-plugins/pkg/fluence/core/core.go): is given to the [framework.CycleState](https://github.com/kubernetes/kubernetes/blob/242b41b36a20032f99e8a059ca0a5d764105217b/pkg/scheduler/framework/cycle_state.go#L48) and serves as a vehicle to store a cache of node name assignment.
@@ -583,14 +524,14 @@ The install commands are shown above, but often you want to uninstall!
 ```bash
  helm list
 NAME                    NAMESPACE       REVISION        UPDATED                                 STATUS          CHART                   APP VERSION
-schedscheduler-plugins  default         1               2024-01-08 12:04:58.558612156 -0700 MST deployed        scheduler-plugins-0.27.80.27.8     
+fluence  default         1               2024-01-08 12:04:58.558612156 -0700 MST deployed        scheduler-plugins-0.27.80.27.8     
 ```
 
 And then uninstall:
 
 ```bash
-$ helm uninstall schedscheduler-plugins
-release "schedscheduler-plugins" uninstalled
+$ helm uninstall fluence
+release "fluence" uninstalled
 ```
 
 

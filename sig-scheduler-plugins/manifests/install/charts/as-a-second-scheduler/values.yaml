@@ -22,6 +22,7 @@ scheduler:
 controller:
   name: scheduler-plugins-controller
   image: registry.k8s.io/scheduler-plugins/controller:v0.27.8
+  image: ghcr.io/flux-framework/fluence-controller:latest
   replicaCount: 1
   pullPolicy: IfNotPresent
 
