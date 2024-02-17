@@ -8,7 +8,7 @@ Fluence enables HPC-grade pod scheduling in Kubernetes via the [Kubernetes Sched
 
 ## Getting started
 
-For instructions on how to start Fluence on a K8s cluster, see [examples](examples/). Documentation and instructions for reproducing our CANOPIE2022 paper (citation below) can be found in the [canopie22-artifacts branch](https://github.com/flux-framework/flux-k8s/tree/canopie22-artifacts).
+For instructions on how to start Fluence on a K8s cluster, see [examples](examples/). Documentation and instructions for reproducing our CANOPIE-2022 paper (citation below) can be found in the [canopie22-artifacts branch](https://github.com/flux-framework/flux-k8s/tree/canopie22-artifacts).
 For background on the Flux framework and the Fluxion scheduler, you can take a look at our award-winning R&D100 submission: https://ipo.llnl.gov/sites/default/files/2022-02/Flux_RD100_Final.pdf. For next steps:
 
  - To understand how it works, see [Design](#design)
@@ -56,8 +56,13 @@ pods with different names cannot be part of the same group that needs to be sche
 ### Deploy
 
 We provide a set of pre-build containers [alongside the repository](https://github.com/orgs/flux-framework/packages?repo_name=flux-k8s)
-that you can easily use to deploy Fluence right away! You'll simply need to clone the proper helm charts, and then install to your cluster.
-We provide helper commands to do that.
+that you can easily use to deploy Fluence right away! You'll first need to install the certificate manager:
+
+```bash
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.1/cert-manager.yaml
+```
+
+And then clone the proper helm charts, and then install to your cluster. We provide helper commands to do that.
 
 ```bash
 # This clones the upstream scheduler plugins code, we will add fluence to it!
@@ -131,7 +136,13 @@ docker push docker.io/vanessa/fluence-controller
 These steps will require a Kubernetes cluster to install to, and having pushed the plugin container to a registry. If you aren't using a cloud provider, you can create a local one with `kind`:
 
 ```bash
-kind create cluster
+kind create cluster --config ./examples/kind-config.yaml
+```
+
+And install the certificate manager:
+
+```bash
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.1/cert-manager.yaml
 ```
 
 **Important** if you are developing or testing fluence, note that custom scheduler plugins don't seem to work out of the box with MiniKube (but everything works with kind). Likely there are extensions or similar that need to be configured with MiniKube (that we have not looked into).
@@ -456,7 +467,7 @@ Note that if you want to enable extra endpoints for the fluence kubectl plugin a
 helm install \
   --set scheduler.image=ghcr.io/vsoch/fluence:latest \
   --set scheduler.enableExternalService=true \
-  --set controller.image=vanessa/fluence-controller \
+  --set controller.image=ghcr.io/vsoch/fluence-controller \
   --set scheduler.sidecarimage=ghcr.io/vsoch/fluence-sidecar:latest \
         fluence as-a-second-scheduler/
 ```

@@ -27,15 +27,23 @@ prepare: clone
 	# These are entirely new directory structures
 	rm -rf $(CLONE_UPSTREAM)/pkg/fluence
 	rm -rf $(CLONE_UPSTREAM)/pkg/controllers/podgroup_controller.go
-	rm -rf $(CLONE_UPSTREAM)/manifests/fluence
+	rm -rf $(CLONE_UPSTREAM)/apis/scheduling/v1alpha1/podgroup_webhook.go
+	rm -rf $(CLONE_UPSTREAM)/cmd/controller/app/server.go
+#	rm -rf $(CLONE_UPSTREAM)/manifests/fluence
+#	rm -rf $(CLONE_UPSTREAM)/config/webhook
 	cp -R sig-scheduler-plugins/pkg/fluence $(CLONE_UPSTREAM)/pkg/fluence
 	cp -R sig-scheduler-plugins/pkg/controllers/* $(CLONE_UPSTREAM)/pkg/controllers/
+	cp -R sig-scheduler-plugins/config/default/* $(CLONE_UPSTREAM)/config/default/
+#	cp -R sig-scheduler-plugins/config/webhook $(CLONE_UPSTREAM)/config/webhook
 	# This is the one exception not from sig-scheduler-plugins because it is needed in both spots
 	cp -R src/fluence/fluxcli-grpc $(CLONE_UPSTREAM)/pkg/fluence/fluxcli-grpc
 	# These are files with subtle changes to add fluence
 	cp sig-scheduler-plugins/cmd/scheduler/main.go ./upstream/cmd/scheduler/main.go
-	cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/templates/deployment.yaml $(CLONE_UPSTREAM)/manifests/install/charts/as-a-second-scheduler/templates/deployment.yaml
+	cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/templates/*.yaml $(CLONE_UPSTREAM)/manifests/install/charts/as-a-second-scheduler/templates/
+	cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/crds/*.yaml $(CLONE_UPSTREAM)/manifests/install/charts/as-a-second-scheduler/crds/
 	cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/values.yaml $(CLONE_UPSTREAM)/manifests/install/charts/as-a-second-scheduler/values.yaml
+	cp sig-scheduler-plugins/apis/scheduling/v1alpha1/podgroup_webhook.go $(CLONE_UPSTREAM)/apis/scheduling/v1alpha1/podgroup_webhook.go
+	cp sig-scheduler-plugins/cmd/controller/app/server.go $(CLONE_UPSTREAM)/cmd/controller/app/server.go
 
 build: prepare
 	REGISTRY=${REGISTRY} IMAGE=${SCHEDULER_IMAGE} CONTROLLER_IMAGE=${CONTROLLER_IMAGE} $(BASH) $(CLONE_UPSTREAM)/hack/build-images.sh

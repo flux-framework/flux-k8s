@@ -1,0 +1,36 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ include "scheduler-plugins-as-a-second-scheduler.name" . }}-mutating-webhook-configuration
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "scheduler-plugins-as-a-second-scheduler.fullname" . }}-serving-cert
+  labels:
+  {{- include "scheduler-plugins-as-a-second-scheduler.labels" . | nindent 4 }}
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: '{{ include "scheduler-plugins-as-a-second-scheduler.fullname" . }}-webhook-service'
+      namespace: '{{ .Release.Namespace }}'
+      path: /mutate-v1-fluence
+      port: 9443
+
+  failurePolicy: Fail
+  name: morascache.kb.io
+  rules:
+  - apiGroups:
+    - ""
+    - core
+    - batch
+    - scheduling.x-k8s.io
+    apiVersions:
+    - v1
+    - v1alpha1
+    operations:
+    - CREATE
+    resources:
+    - pods
+    - jobs
+    - podgroups
+  sideEffects: None
