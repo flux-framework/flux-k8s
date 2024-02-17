@@ -7,7 +7,7 @@ import (
 	pb "github.com/flux-framework/flux-k8s/flux-plugin/fluence/fluxcli-grpc"
 	"github.com/flux-framework/flux-k8s/flux-plugin/fluence/jobspec"
 	"github.com/flux-framework/flux-k8s/flux-plugin/fluence/utils"
-	"github.com/flux-framework/flux-sched/resource/reapi/bindings/go/src/fluxcli"
+	"github.com/flux-framework/fluxion-go/pkg/fluxcli"
 	"k8s.io/klog/v2"
 
 	"context"
