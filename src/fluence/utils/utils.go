@@ -16,6 +16,10 @@ import (
 	resourcehelper "k8s.io/kubectl/pkg/util/resource"
 )
 
+var (
+	controlPlaneLabel = "node-role.kubernetes.io/control-plane"
+)
+
 // CreateJGF creates the Json Graph Format
 func CreateJGF(filename string, skipLabel *string) error {
 	ctx := context.Background()
@@ -55,12 +59,18 @@ func CreateJGF(filename string, skipLabel *string) error {
 
 	for node_index, node := range nodes.Items {
 
-		// Question from V: what was this for (what is a worker)?
-		// _, worker := node.Labels["node-role.kubernetes.io/worker"]
+		// We should not be scheduling to the control plane
+		_, ok := node.Labels[controlPlaneLabel]
+		if ok {
+			fmt.Println("Skipping control plane node ", node.GetName())
+			continue
+		}
 
+		// Anything labeled with "skipLabel" meaning it is present,
+		// should be skipped
 		if *skipLabel != "" {
-			_, fluxnode := node.Labels[*skipLabel]
-			if !fluxnode {
+			_, ok := node.Labels[*skipLabel]
+			if ok {
 				fmt.Println("Skipping node ", node.GetName())
 				continue
 			}

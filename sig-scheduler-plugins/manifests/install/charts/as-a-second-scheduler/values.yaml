@@ -21,7 +21,6 @@ scheduler:
 
 controller:
   name: scheduler-plugins-controller
-  image: registry.k8s.io/scheduler-plugins/controller:v0.27.8
   image: ghcr.io/flux-framework/fluence-controller:latest
   replicaCount: 1
   pullPolicy: IfNotPresent
@@ -45,3 +44,12 @@ pluginConfig:
 #   args:
 #     scoringStrategy:
 #       type: MostAllocated # default is LeastAllocated
+
+enableCertManager: true
+kubernetesClusterDomain: cluster.local
+webhookService:
+  ports:
+  - port: 9443
+    protocol: TCP
+    targetPort: 9443
+  type: ClusterIP

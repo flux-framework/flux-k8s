@@ -107,12 +107,21 @@ jobs:
         name: fluence_controller
         path: /tmp
 
+    - name: Make Space For Build
+      run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          
     - name: Load Docker images
       run: |
         ls /tmp/*.tar.gz
         docker load --input /tmp/fluence_sidecar_latest.tar.gz
+        rm /tmp/fluence_sidecar_latest.tar.gz
         docker load --input /tmp/fluence_latest.tar.gz
+        rm /tmp/fluence_latest.tar.gz
         docker load --input /tmp/fluence_controller_latest.tar.gz
+        rm /tmp/fluence_controller_latest.tar.gz
         docker image ls -a | grep fluence
 
     - name: Create Kind Cluster
@@ -121,6 +130,7 @@ jobs:
         cluster_name: kind
         kubectl_version: v1.28.2
         version: v0.20.0
+        config: ./.github/test-kind-config.yaml
         
     - name: Load Docker Containers into Kind
       env:
@@ -132,6 +142,11 @@ jobs:
         kind load docker-image ${fluence}
         kind load docker-image ${sidecar}
         kind load docker-image ${controller}
+
+    - name: Install Cert Manager
+      run: |
+        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.1/cert-manager.yaml
+        sleep 10
 
     - name: Test Fluence
       run: /bin/bash ./.github/test.sh

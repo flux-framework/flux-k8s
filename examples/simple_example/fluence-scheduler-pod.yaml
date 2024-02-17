@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: fluence-scheduled-pod
+  name: fluence-scheduled-pod-1
   labels:
     name: scheduler-example
 spec:
