@@ -11,30 +11,42 @@ on:
 
 jobs:
   build-fluence:
+
+    # The scheduler and controller are built together with the hack script
+    # in the upstream scheduler-plugins
     env:
       container: ghcr.io/flux-framework/fluence
+      controller: ghcr.io/flux-framework/fluence-controller
     runs-on: ubuntu-latest
     name: build fluence
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-go@v3
+    - uses: actions/setup-go@v4
       with:
         go-version: ^1.19
 
     - name: Build Containers
       run: |
         make prepare
-        make build REGISTRY=ghcr.io/flux-framework SCHEDULER_IMAGE=fluence
+        make build REGISTRY=ghcr.io/flux-framework SCHEDULER_IMAGE=fluence CONTROLLER_IMAGE=fluence-controller
 
-    - name: Save Container
-      run: docker save ${{ env.container }} | gzip > fluence_latest.tar.gz
+    - name: Save Containers
+      run: |
+        docker save ${{ env.container }} | gzip > fluence_latest.tar.gz
+        docker save ${{ env.controller }} | gzip > fluence_controller_latest.tar.gz
 
     - name: Upload container artifact
       uses: actions/upload-artifact@v4
       with:
         name: fluence
         path: fluence_latest.tar.gz
-      
+
+    - name: Upload container artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: fluence_controller
+        path: fluence_controller_latest.tar.gz
+
   build-sidecar:
     env:
       container: ghcr.io/flux-framework/fluence-sidecar
@@ -42,7 +54,7 @@ jobs:
     name: build sidecar
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-go@v3
+    - uses: actions/setup-go@v4
       with:
         go-version: ^1.19
 
@@ -59,7 +71,7 @@ jobs:
       with:
         name: fluence_sidecar
         path: fluence_sidecar_latest.tar.gz
-      
+
   test-fluence:
     needs: [build-fluence, build-sidecar]
     permissions:
@@ -67,14 +79,15 @@ jobs:
     env:
       fluence_container: ghcr.io/flux-framework/fluence
       sidecar_container: ghcr.io/flux-framework/fluence-sidecar
+      controller_container: ghcr.io/flux-framework/fluence-controller
 
     runs-on: ubuntu-latest
-    name: build fluence
+    name: test fluence
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-go@v3
+    - uses: actions/setup-go@v4
       with:
-        go-version: ^1.20
+        go-version: ^1.19
 
     - name: Download fluence artifact
       uses: actions/download-artifact@v4
@@ -88,11 +101,18 @@ jobs:
         name: fluence_sidecar
         path: /tmp
 
+    - name: Download fluence_controller artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: fluence_controller
+        path: /tmp
+
     - name: Load Docker images
       run: |
         ls /tmp/*.tar.gz
         docker load --input /tmp/fluence_sidecar_latest.tar.gz
         docker load --input /tmp/fluence_latest.tar.gz
+        docker load --input /tmp/fluence_controller_latest.tar.gz
         docker image ls -a | grep fluence
 
     - name: Create Kind Cluster
@@ -106,10 +126,12 @@ jobs:
       env:
         fluence: ${{ env.fluence_container }}
         sidecar: ${{ env.sidecar_container }}
+        controller: ${{ env.controller_container }}
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         kind load docker-image ${fluence}
         kind load docker-image ${sidecar}
+        kind load docker-image ${controller}
 
     - name: Test Fluence
       run: /bin/bash ./.github/test.sh
@@ -122,6 +144,8 @@ jobs:
         docker tag ${{ env.fluence_container }}:latest ${{ env.fluence_container }}:${tag}
         echo "Tagging and releasing ${{ env.sidecar_container}}:${tag}"        
         docker tag ${{ env.sidecar_container }}:latest ${{ env.sidecar_container }}:${tag}
+        echo "Tagging and releasing ${{ env.controller_container}}:${tag}"        
+        docker tag ${{ env.controller_container }}:latest ${{ env.controller_container }}:${tag}
 
      # If we get here, tests pass, and we can deploy
     - name: GHCR Login
@@ -137,3 +161,4 @@ jobs:
       run: |
         docker push ${{ env.fluence_container }} --all-tags
         docker push ${{ env.sidecar_container }} --all-tags
+        docker push ${{ env.controller_container }} --all-tags
