@@ -27,7 +27,6 @@ prepare: clone
 	# These are entirely new directory structures
 	rm -rf $(CLONE_UPSTREAM)/pkg/fluence
 	rm -rf $(CLONE_UPSTREAM)/pkg/controllers/podgroup_controller.go
-	rm -rf $(CLONE_UPSTREAM)/apis/scheduling/v1alpha1/podgroup_webhook.go
 	rm -rf $(CLONE_UPSTREAM)/cmd/controller/app/server.go
 	cp -R sig-scheduler-plugins/pkg/fluence $(CLONE_UPSTREAM)/pkg/fluence
 	cp -R sig-scheduler-plugins/pkg/controllers/* $(CLONE_UPSTREAM)/pkg/controllers/
@@ -38,7 +37,7 @@ prepare: clone
 	cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/templates/*.yaml $(CLONE_UPSTREAM)/manifests/install/charts/as-a-second-scheduler/templates/
 	cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/crds/*.yaml $(CLONE_UPSTREAM)/manifests/install/charts/as-a-second-scheduler/crds/
 	cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/values.yaml $(CLONE_UPSTREAM)/manifests/install/charts/as-a-second-scheduler/values.yaml
-	cp sig-scheduler-plugins/apis/scheduling/v1alpha1/podgroup_webhook.go $(CLONE_UPSTREAM)/apis/scheduling/v1alpha1/podgroup_webhook.go
+	cp sig-scheduler-plugins/apis/scheduling/v1alpha1/*.go $(CLONE_UPSTREAM)/apis/scheduling/v1alpha1/
 	cp sig-scheduler-plugins/cmd/controller/app/server.go $(CLONE_UPSTREAM)/cmd/controller/app/server.go
 
 build: prepare

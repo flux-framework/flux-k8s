@@ -61,9 +61,12 @@ func (a *fluenceWatcher) Handle(ctx context.Context, req admission.Request) admi
 		// Assume we operate on the level of pods for now
 		pod := &corev1.Pod{}
 		err := a.decoder.Decode(req, pod)
+
+		// Assume it's a pod group or something else.
+		// We aren't in charge of validating people's pods.
+		// I don't think we should ever hit this case, actually
 		if err != nil {
-			logger.Error(err, "Admission error.")
-			return admission.Errored(http.StatusBadRequest, err)
+			return admission.Allowed("Found non-pod, non-job, this webhook does not validate beyond those.")
 		}
 
 		// If we get here, we decoded a pod
@@ -73,6 +76,8 @@ func (a *fluenceWatcher) Handle(ctx context.Context, req admission.Request) admi
 			return admission.Errored(http.StatusBadRequest, err)
 		}
 
+		// Send the updated pod to the events channel
+		//*a.events <- event.GenericEvent{Object: pod}
 		logger.Info("Admission pod success.")
 
 		marshalledPod, err := json.Marshal(pod)
@@ -92,7 +97,10 @@ func (a *fluenceWatcher) Handle(ctx context.Context, req admission.Request) admi
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
+	// Send the updated job to the events channel
+	//*a.events <- event.GenericEvent{Object: job}
 	logger.Info("Admission job success.")
+
 	marshalledJob, err := json.Marshal(job)
 	if err != nil {
 		logger.Error(err, "Marshalling job error.")
@@ -106,12 +114,20 @@ func (a *fluenceWatcher) Handle(ctx context.Context, req admission.Request) admi
 // Default is the expected entrypoint for a webhook...
 // I don't remember if this is even called...
 func (a *fluenceWatcher) Default(ctx context.Context, obj runtime.Object) error {
-	pod, ok := obj.(*corev1.Pod)
+	job, ok := obj.(*batchv1.Job)
 	if !ok {
-		return fmt.Errorf("expected a Pod or Job but got a %T", obj)
+		pod, ok := obj.(*corev1.Pod)
+
+		// This is adkin to an admission success - it's not a pod or job, so we don't care
+		// I don't think we should ever hit this case, actually
+		if !ok {
+			return nil
+		}
+		logger.Info(fmt.Sprintf("Pod %s is marked for fluence.", pod.Name))
+		return a.EnsureGroup(pod)
 	}
-	logger.Info(fmt.Sprintf("Pod %s is marked for fluence.", pod.Name))
-	return a.EnsureGroup(pod)
+	logger.Info(fmt.Sprintf("Job %s is marked for fluence.", job.Name))
+	return a.EnsureGroupOnJob(job)
 }
 
 // EnsureGroup adds pod group label and size if not present
@@ -127,12 +143,12 @@ func (a *fluenceWatcher) EnsureGroup(pod *corev1.Pod) error {
 	}
 
 	// Do we have a group name?
-	groupName, ok := pod.Labels[labels.PodGroupNameLabel]
+	groupName, ok := pod.Labels[labels.PodGroupLabel]
 
 	// If we don't have a fluence group, create one under fluence namespace
 	if !ok {
-		groupName = fmt.Sprintf("fluence-group-%s-%s", pod.Namespace, pod.Name)
-		pod.Labels[labels.PodGroupNameLabel] = groupName
+		groupName = fmt.Sprintf("fluence-group-%s", pod.Name)
+		pod.Labels[labels.PodGroupLabel] = groupName
 	}
 
 	// Do we have a group size? This will be parsed as a string, likely
@@ -174,10 +190,10 @@ func (a *fluenceWatcher) EnsureGroupOnJob(job *batchv1.Job) error {
 
 	/// First get the name for the pod group (also setting on the pod template)
 	defaultName := fmt.Sprintf("fluence-group-%s-%s", job.Namespace, job.Name)
-	groupName := getJobLabel(job, labels.PodGroupNameLabel, defaultName)
+	groupName := getJobLabel(job, labels.PodGroupLabel, defaultName)
 
 	// Wherever we find it, make sure the pod group name is on the pod spec template
-	job.Spec.Template.ObjectMeta.Labels[labels.PodGroupNameLabel] = groupName
+	job.Spec.Template.ObjectMeta.Labels[labels.PodGroupLabel] = groupName
 
 	// Now do the same for the size, but the size is the size of the job
 	jobSize := *job.Spec.Parallelism

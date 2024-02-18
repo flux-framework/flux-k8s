@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+
 	api "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 	"sigs.k8s.io/scheduler-plugins/pkg/controllers"
 )
@@ -61,6 +62,10 @@ func Run(s *ServerRunOptions) error {
 		setupLog.Error(err, "unable to start manager")
 		return err
 	}
+
+	// Create a channel for the mutating webhook to communicate back to the reconciler
+	// This way we create the PodGroup before scheduling
+	//c := make(chan event.GenericEvent)
 
 	if err = (&controllers.PodGroupReconciler{
 		Client:  mgr.GetClient(),

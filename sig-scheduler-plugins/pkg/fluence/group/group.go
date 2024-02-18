@@ -67,7 +67,7 @@ func DeleteFluenceGroup(pod *v1.Pod) {
 
 // getFluenceGroupName looks for the group to indicate a fluence group, and returns it
 func getFluenceGroupName(pod *v1.Pod) string {
-	groupName, _ := pod.Labels[labels.PodGroupNameLabel]
+	groupName, _ := pod.Labels[labels.PodGroupLabel]
 	return groupName
 }
 

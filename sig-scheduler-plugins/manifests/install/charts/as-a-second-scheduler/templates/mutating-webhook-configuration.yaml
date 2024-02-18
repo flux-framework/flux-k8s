@@ -36,5 +36,6 @@ webhooks:
     resources:
     - pods
     - jobs
-    - podgroups
+# Can uncomment this if we want to mutate the pod groups after creation
+#    - podgroups
   sideEffects: None
