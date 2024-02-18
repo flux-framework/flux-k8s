@@ -23,7 +23,7 @@ controller:
   name: scheduler-plugins-controller
   image: ghcr.io/flux-framework/fluence-controller:latest
   replicaCount: 1
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
 # LoadVariationRiskBalancing and TargetLoadPacking are not enabled by default
 # as they need extra RBAC privileges on metrics.k8s.io.

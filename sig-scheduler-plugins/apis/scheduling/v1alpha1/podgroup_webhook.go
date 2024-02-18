@@ -21,6 +21,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+	"sigs.k8s.io/scheduler-plugins/pkg/fluence/labels"
 )
 
 var (
@@ -41,20 +42,23 @@ func NewMutatingWebhook(mgr manager.Manager) *fluenceWatcher {
 }
 
 // mutate-v1-fluence
-
 type fluenceWatcher struct {
 	decoder *admission.Decoder
 }
 
+// Handle is the main handler for the webhook, which is looking for jobs and pods (in that order)
+// If a job comes in (with a pod template) first, we add the labels there first (and they will
+// not be added again).
 func (a *fluenceWatcher) Handle(ctx context.Context, req admission.Request) admission.Response {
 
 	logger.Info("Running webhook handle")
-	// First try for job
+
+	// Try for a job first, which would be created before pods
 	job := &batchv1.Job{}
 	err := a.decoder.Decode(req, job)
 	if err != nil {
 
-		// Try for a pod next
+		// Assume we operate on the level of pods for now
 		pod := &corev1.Pod{}
 		err := a.decoder.Decode(req, pod)
 		if err != nil {
@@ -63,32 +67,33 @@ func (a *fluenceWatcher) Handle(ctx context.Context, req admission.Request) admi
 		}
 
 		// If we get here, we decoded a pod
-		/*err = a.InjectPod(pod)
+		err = a.EnsureGroup(pod)
 		if err != nil {
-			logger.Error("Inject pod error.", err)
+			logger.Error(err, "Issue adding PodGroup to pod.")
 			return admission.Errored(http.StatusBadRequest, err)
-		}*/
+		}
 
-		// Mutate the fields in pod
+		logger.Info("Admission pod success.")
+
 		marshalledPod, err := json.Marshal(pod)
 		if err != nil {
 			logger.Error(err, "Marshalling pod error.")
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
-		logger.Info("Admission pod success.")
+
+		logger.Info("Admission job success.")
 		return admission.PatchResponseFromRaw(req.Object.Raw, marshalledPod)
 	}
-	/*
-	   // If we get here, we found a job
-	   err = a.InjectJob(job)
 
-	   	if err != nil {
-	   		logger.Error("Inject job error.", err)
-	   		return admission.Errored(http.StatusBadRequest, err)
-	   	}*/
+	// If we get here, err was nil and we have a Job!
+	err = a.EnsureGroupOnJob(job)
+	if err != nil {
+		logger.Error(err, "Issue adding PodGroup to job.")
+		return admission.Errored(http.StatusBadRequest, err)
+	}
 
+	logger.Info("Admission job success.")
 	marshalledJob, err := json.Marshal(job)
-
 	if err != nil {
 		logger.Error(err, "Marshalling job error.")
 		return admission.Errored(http.StatusInternalServerError, err)
@@ -98,93 +103,89 @@ func (a *fluenceWatcher) Handle(ctx context.Context, req admission.Request) admi
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshalledJob)
 }
 
-// Default is the expected entrypoint for a webhook
+// Default is the expected entrypoint for a webhook...
+// I don't remember if this is even called...
 func (a *fluenceWatcher) Default(ctx context.Context, obj runtime.Object) error {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
-		job, ok := obj.(*batchv1.Job)
-		if !ok {
-			return fmt.Errorf("expected a Pod or Job but got a %T", obj)
-		}
-		logger.Info(fmt.Sprintf("Job %s is marked for fluence.", job.Name))
-		return nil
-		//		return a.InjectJob(job)
+		return fmt.Errorf("expected a Pod or Job but got a %T", obj)
 	}
 	logger.Info(fmt.Sprintf("Pod %s is marked for fluence.", pod.Name))
-	return nil
-	//return a.InjectPod(pod)
+	return a.EnsureGroup(pod)
 }
 
-// InjectPod adds the sidecar container to a pod
-func (a *fluenceWatcher) InjectPod(pod *corev1.Pod) error {
+// EnsureGroup adds pod group label and size if not present
+// This ensures that every pod passing through is part of a group.
+// Note that we need to do similar for Job.
+// A pod without a job wrapper, and without metadata is a group
+// of size 1.
+func (a *fluenceWatcher) EnsureGroup(pod *corev1.Pod) error {
 
-	/*
-		// Cut out early if we have no labels
-		if pod.Annotations == nil {
-			logger.Info(fmt.Sprintf("Pod %s is not marked for oras storage.", pod.Name))
-			return nil
-		}
+	// Add labels if we don't have anything. Everything is a group!
+	if pod.Labels == nil {
+		pod.Labels = map[string]string{}
+	}
 
-		// Parse oras known labels into settings
-		settings := orasSettings.NewOrasCacheSettings(pod.Annotations)
+	// Do we have a group name?
+	groupName, ok := pod.Labels[labels.PodGroupNameLabel]
 
-		// Cut out early if no oras identifiers!
-		if !settings.MarkedForOras {
-			logger.Warnf("Pod %s is not marked for oras storage.", pod.Name)
-			return nil
-		}
+	// If we don't have a fluence group, create one under fluence namespace
+	if !ok {
+		groupName = fmt.Sprintf("fluence-group-%s-%s", pod.Namespace, pod.Name)
+		pod.Labels[labels.PodGroupNameLabel] = groupName
+	}
 
-		// Validate, return error if no good here.
-		if !settings.Validate() {
-			logger.Warnf("Pod %s oras storage did not validate.", pod.Name)
-			return fmt.Errorf("oras storage was requested but is not valid")
-		}
-
-		// The selector for the namespaced registry is the namespace
-		if pod.Labels == nil {
-			pod.Labels = map[string]string{}
-		}
-
-		// Even pods without say, the launcher, that are marked should have the network added
-		pod.Labels[defaults.OrasSelectorKey] = pod.ObjectMeta.Namespace
-		oras.AddSidecar(&pod.Spec, pod.ObjectMeta.Namespace, settings)
-		logger.Info(fmt.Sprintf("Pod %s is marked for oras storage.", pod.Name))*/
+	// Do we have a group size? This will be parsed as a string, likely
+	groupSize, ok := pod.Labels[labels.PodGroupSizeLabel]
+	if !ok {
+		groupSize = "1"
+		pod.Labels[labels.PodGroupSizeLabel] = groupSize
+	}
 	return nil
 }
 
-// InjectJob adds the sidecar container to the PodTemplateSpec of the Job
-func (a *fluenceWatcher) InjectJob(job *batchv1.Job) error {
+// getJobLabel takes a label name and default and returns the value
+// We look on both the job and underlying pod spec template
+func getJobLabel(job *batchv1.Job, labelName, defaultLabel string) string {
 
-	/*
-		// Cut out early if we have no labels
-		if job.Annotations == nil {
-			logger.Info(fmt.Sprintf("Job %s is not marked for oras storage.", job.Name))
-			return nil
+	value, ok := job.Labels[labelName]
+	if !ok {
+		value, ok = job.Spec.Template.ObjectMeta.Labels[labelName]
+		if !ok {
+			value = defaultLabel
 		}
+	}
+	return value
+}
 
-		// Parse oras known labels into settings
-		settings := orasSettings.NewOrasCacheSettings(job.Annotations)
+// EnsureGroupOnJob looks for fluence labels (size and name) on both the job
+// and the pod template. We ultimately put on the pod, the lowest level unit.
+// Since we have the size of the job (paramllism) we can use that for the size
+func (a *fluenceWatcher) EnsureGroupOnJob(job *batchv1.Job) error {
 
-		// Cut out early if no oras identifiers!
-		if !settings.MarkedForOras {
-			logger.Warnf("Job %s is not marked for oras storage.", job.Name)
-			return nil
-		}
+	// Be forgiving - allow the person to specify it on the job directly or on the Podtemplate
+	// We will ultimately put the metadata on the Pod.
+	if job.Spec.Template.ObjectMeta.Labels == nil {
+		job.Spec.Template.ObjectMeta.Labels = map[string]string{}
+	}
+	if job.Labels == nil {
+		job.Labels = map[string]string{}
+	}
 
-		// Validate, return error if no good here.
-		if !settings.Validate() {
-			logger.Warnf("Job %s oras storage did not validate.", job.Name)
-			return fmt.Errorf("oras storage was requested but is not valid")
-		}
+	/// First get the name for the pod group (also setting on the pod template)
+	defaultName := fmt.Sprintf("fluence-group-%s-%s", job.Namespace, job.Name)
+	groupName := getJobLabel(job, labels.PodGroupNameLabel, defaultName)
 
-		// Add the sidecar to the podspec of the job
-		if job.Spec.Template.Labels == nil {
-			job.Spec.Template.Labels = map[string]string{}
-		}
+	// Wherever we find it, make sure the pod group name is on the pod spec template
+	job.Spec.Template.ObjectMeta.Labels[labels.PodGroupNameLabel] = groupName
 
-		// Add network to spec template so all pods are targeted
-		job.Spec.Template.Labels[defaults.OrasSelectorKey] = job.ObjectMeta.Namespace
-		oras.AddSidecar(&job.Spec.Template.Spec, job.ObjectMeta.Namespace, settings)
-		logger.Info(fmt.Sprintf("Job %s is marked for oras storage.", job.Name))*/
+	// Now do the same for the size, but the size is the size of the job
+	jobSize := *job.Spec.Parallelism
+	if jobSize == int32(0) {
+		jobSize = int32(1)
+	}
+	labelSize := fmt.Sprintf("%d", jobSize)
+	groupSize := getJobLabel(job, labels.PodGroupSizeLabel, labelSize)
+	job.Spec.Template.ObjectMeta.Labels[labels.PodGroupSizeLabel] = groupSize
 	return nil
 }

@@ -10,11 +10,7 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 
 	fcore "sigs.k8s.io/scheduler-plugins/pkg/fluence/core"
-)
-
-const (
-	PodGroupNameLabel = "fluence.pod-group"
-	PodGroupSizeLabel = "fluence.group-size"
+	"sigs.k8s.io/scheduler-plugins/pkg/fluence/labels"
 )
 
 // getDefaultGroupName returns a group name based on the pod namespace and name
@@ -71,13 +67,13 @@ func DeleteFluenceGroup(pod *v1.Pod) {
 
 // getFluenceGroupName looks for the group to indicate a fluence group, and returns it
 func getFluenceGroupName(pod *v1.Pod) string {
-	groupName, _ := pod.Labels[PodGroupNameLabel]
+	groupName, _ := pod.Labels[labels.PodGroupNameLabel]
 	return groupName
 }
 
 // getFluenceGroupSize gets the size of the fluence group
 func getFluenceGroupSize(pod *v1.Pod) int32 {
-	size, _ := pod.Labels[PodGroupSizeLabel]
+	size, _ := pod.Labels[labels.PodGroupSizeLabel]
 
 	// Default size of 1 if the label is not set (but name is)
 	if size == "" {

@@ -199,11 +199,12 @@ func (r *PodGroupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // podToPodGroup is a watcher that looks for pods and associated pod group
 func (r *PodGroupReconciler) podToPodGroup(ctx context.Context, obj client.Object) []ctrl.Request {
 
+	r.log.Info("PANCAKES pre get pod in podToPodGroup flux-framework/fluence-controller")
 	pod, ok := obj.(*v1.Pod)
 	if !ok {
 		return nil
 	}
-	r.log.Info("podToPodGroup flux-framework/fluence-controller")
+	r.log.Info("PANCAKES post get pod in podToPodGroup flux-framework/fluence-controller")
 	r.log.V(5).Info("Running podToPodGroup", "pod", pod.Name, "namespace", pod.Namespace)
 	pgName := util.GetPodGroupLabel(pod)
 	if len(pgName) == 0 {
@@ -211,6 +212,32 @@ func (r *PodGroupReconciler) podToPodGroup(ctx context.Context, obj client.Objec
 	}
 
 	r.log.V(5).Info("Add pod group when pod gets added", "podGroup", pgName, "pod", pod.Name, "namespace", pod.Namespace)
+
+	// TODO we need an ability to trigger a create here. Likely we will just add
+	// the create function to watches. I'm wondering if we want to set the owner
+	// to the pod or the job that triggers?
+	// newPodGroup ensures we have a pod group
+	/*func newPodGroup(name, namespace string, size int32, pod *v1.Pod) {
+
+		// Create an owner reference to the pod
+		// https://github.com/kubernetes/apimachinery/blob/master/pkg/apis/meta/v1/types.go#L295
+		ownerRef := metav1.OwnerReferences{
+			Kind:       pod.ObjectMeta.Kind,
+			Name:       pod.Name,
+			APIVersion: pod.ObjectMeta.APIVersion,
+			UID:        pod.ObjectMeta.UID,
+		}
+		pg := PodGroup{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            name,
+				Namespace:       namespace,
+				OwnerReferences: []metav1.OwnerReferences{ownerRef},
+			},
+			Spec: PodGroupSpec{
+				MinMember: size,
+			},
+		}
+	}*/
 
 	return []ctrl.Request{{
 		NamespacedName: types.NamespacedName{

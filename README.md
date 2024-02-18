@@ -21,18 +21,26 @@ For background on the Flux framework and the Fluxion scheduler, you can take a l
 Fluence is a custom scheduler plugin that you can specify to use with two directive in your pod spec -
 
 - Asking for `fluence` as the scheduler name
-- Defining a named group of pods with the `fluence.flux-framework.org/pod-group` label. 
-- Defining the group size with the `fluence.flux-framework.org/group-size` label. 
+- On either a job or a single or group of pods:
+  - Defining a named group of pods with the `fluence.flux-framework.org/pod-group` label. 
+  - Defining the group size with the `fluence.flux-framework.org/group-size` label. 
 
-If you are using Fluence, these values are required.
-An example is shown below for an indexed job, which will create multiple pods.
+The way it works:
+
+1. We have a mutating admission webhook that looks for jobs and pods, and ensures there are fluence labels.
+2. A PodGroup reconciler is watching for these same objects. When they are created (this is not done yet):
+  a. We find the labels and create the pod group object.
+  b. The pod group object has a timestamp for creation.
+3. When the pod is then given to fluence for scheduling, it already has the PodGroup created with name/size and can properly sort.
+
+Another strategy I'm considering (if the above runs into trouble) is to watch a [channel](https://book-v1.book.kubebuilder.io/beyond_basics/controller_watches). An example is shown below for an indexed job, which will create multiple pods.
 
 ```yaml
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: fluence-job
-  annotations:
+  labels:
     fluence.flux-framework.org/pod-group: my-pods
     fluence.flux-framework.org/group-size: 10
 spec:
@@ -222,17 +230,6 @@ helm install \
   --set scheduler.image=vanessa/fluence:latest \
   --set scheduler.sidecarimage=vanessa/fluence-sidecar \
   --set controller.image=vanessa/fluence-controller \
-    fluence as-a-second-scheduler/
-```
-
-If you load your images into your testing environment and don't need to pull, you can change the pull policy too:
-
-```bash
-helm install \
-  --set scheduler.image=vanessa/fluence:latest \
-  --set scheduler.sidecarimage=vanessa/fluence-sidecar \
-  --set controller.image=vanessa/fluence-controller \
-  --set scheduler.sidecarPullPolicy=IfNotPresent \
     fluence as-a-second-scheduler/
 ```
 
@@ -433,31 +430,27 @@ make proto
 
 #### Workflow
 
-The easiest thing to do is to build the containers in some container namespace that you control (meaning you can push to a registry), e.g.,:
+You should first do these on your own:
+
+1. Create the kind cluster (`kubectl apply -f ./examples/kind-cluster.yaml`)
+2. Install the certificate manager.
+
+I was having trouble developing this easily because it's a lot of steps to build and load containers and change directories and uninstall/install the charts, so I put together a small script that does the following:
+
+1. Takes a registry of interest (probably doesn't matter since we are working locally, defaults to `ghcr.io/vsoch`
+2. builds all three images, the controller, sidecar, and fluence
+3. loads them all into kind
+4. changes directory to the charts
+5. uninstalls the fluence helm instance (if installed)
+6. installs it, targeted the images just built, and setting pullPolicy to never
+
+The last step ensures we use the images we loaded! You can basically just do:
 
 ```bash
-make build REGISTRY=ghcr.io/vsoch
+./hack/quick-build.sh
 ```
 
-If needed, create a "multi node" kind cluster:
-
-```bash
-kind create cluster --config ./examples/kind-config.yaml
-```
-
-And then install with your custom images:
-
-```bash
-cd ./upstream/manifests/install/charts
-helm install \
-  --set scheduler.image=ghcr.io/vsoch/fluence:latest \
-  --set controller.image=ghcr.io/vsoch/fluence-controller:latest \
-  --set scheduler.sidecarimage=ghcr.io/vsoch/fluence-sidecar:latest \
-        fluence as-a-second-scheduler/
-```
-
-And then apply what you need to test, and look at logs! 
-And then keep doing that until you get what you want :) Note that I haven't found a good way for the VSCode developer tools to work because we develop fluence outside of the tree it's supposed to be in.
+This sped up my development time immensely. If you want to manually do the steps, see that script for instructions.
 
 ##### kubectl plugin
 
@@ -472,26 +465,7 @@ helm install \
         fluence as-a-second-scheduler/
 ```
 
-For this setup if you are developing locally with kind, you will need to enable the ingress. Here is `kind-config.yaml`
-
-```yaml
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-nodes:
-- role: control-plane
-  kubeadmConfigPatches:
-  - |
-    kind: InitConfiguration
-    nodeRegistration:
-      kubeletExtraArgs:
-        node-labels: "ingress-ready=true"
-  extraPortMappings:
-  - containerPort: 4242
-    hostPort: 4242
-    protocol: TCP
-```
-
-And to create:
+For this setup if you are developing locally with kind, you will need to enable the ingress, as is done in [examples/kind-config.yaml](examples/kind-config.yaml).
 
 ```bash
 kind create cluster --config ./kind-config.yaml
@@ -500,7 +474,6 @@ kind create cluster --config ./kind-config.yaml
 #### TODO
 
  - Try what [kueue does](https://github.com/kubernetes-sigs/kueue/blob/6d57813a52066dab412735deeeb60ebb0cdb8e8e/cmd/kueue/main.go#L146-L155) to not require cert-manager.
- - Possible bug with using kind (with custom config we are scheduling things to the control plane) - need to verify this didn't start happening with mutating webhook addition.
 
 #### Vanessa Thinking
 
