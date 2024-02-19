@@ -180,7 +180,7 @@ func (r *PodGroupReconciler) updateStatus(
 	switch pg.Status.Phase {
 	case "":
 		pg.Status.Phase = schedv1alpha1.PodGroupPending
-		result, err := r.updateOwnerReferences(ctx, pg, &pods[0])
+		result, err := r.updateOwnerReferences(ctx, pg, pods)
 		if result.Requeue || err != nil {
 			return result, err
 		}
@@ -188,7 +188,7 @@ func (r *PodGroupReconciler) updateStatus(
 	case schedv1alpha1.PodGroupPending:
 		if len(pods) >= int(pg.Spec.MinMember) {
 			pg.Status.Phase = schedv1alpha1.PodGroupScheduling
-			result, err := r.updateOwnerReferences(ctx, pg, &pods[0])
+			result, err := r.updateOwnerReferences(ctx, pg, pods)
 			if result.Requeue || err != nil {
 				return result, err
 			}
@@ -349,12 +349,21 @@ func getCurrentPodStats(pods []v1.Pod) (int32, int32, int32) {
 func (r *PodGroupReconciler) updateOwnerReferences(
 	ctx context.Context,
 	pg *schedv1alpha1.PodGroup,
-	pod *v1.Pod,
+	pods []v1.Pod,
 ) (ctrl.Result, error) {
+
+	// We will want to re-queue in most cases
+	result := ctrl.Result{Requeue: true}
+
+	// No pods, just ignore
+	if len(pods) == 0 {
+		return result, nil
+	}
+	pod := pods[0]
 
 	// Case 1: The pod itself doesn't have owner references. YOLO
 	if len(pod.OwnerReferences) == 0 {
-		return ctrl.Result{}, nil
+		return result, nil
 	}
 
 	// Collect owner references for pod group

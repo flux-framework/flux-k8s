@@ -17,7 +17,6 @@ limitations under the License.
 package utils
 
 import (
-	"fmt"
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
@@ -53,11 +52,8 @@ func PreparePodJobSpec(pod *v1.Pod, groupName string) *pb.PodSpec {
 	// the check back if there is
 	ps.Labels = getPodJobspecLabels(pod)
 
-	// Note that Container gets use for the JobSpec, so we provide
-	// the pod name (to be associated with tasks) for it. We are making
-	// the assumption that this one container represents the group,
-	// which is OK for now, but might not always be true!
-	ps.Container = fmt.Sprintf("%s-%s", pod.Namespace, pod.Name)
+	// the jobname should be the group name
+	ps.Container = groupName
 
 	// Create accumulated requests for cpu and limits
 	// CPU and memory are summed across containers
