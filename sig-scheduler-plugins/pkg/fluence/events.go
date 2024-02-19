@@ -9,6 +9,7 @@ import (
 	klog "k8s.io/klog/v2"
 
 	pb "sigs.k8s.io/scheduler-plugins/pkg/fluence/fluxcli-grpc"
+	fgroup "sigs.k8s.io/scheduler-plugins/pkg/fluence/group"
 )
 
 // Events are associated with inforers, typically on pods, e.g.,
@@ -69,7 +70,13 @@ func (f *Fluence) updatePod(oldObj, newObj interface{}) {
 
 	// a pod is updated, get the group
 	// TODO should we be checking group / size for old vs new?
-	groupName, _ := f.pgMgr.GetPodGroup(context.TODO(), oldPod)
+	groupName, pg := f.pgMgr.GetPodGroup(context.TODO(), oldPod)
+
+	// If PodGroup is nil, still try to look up a faux name
+	if pg == nil {
+		pg = fgroup.CreateFakeGroup(oldPod)
+		groupName = pg.Name
+	}
 
 	klog.Infof("[Fluence] Processing event for pod %s in group %s from %s to %s", newPod.Name, groupName, newPod.Status.Phase, oldPod.Status.Phase)
 
@@ -119,7 +126,13 @@ func (f *Fluence) updatePod(oldObj, newObj interface{}) {
 func (f *Fluence) deletePod(podObj interface{}) {
 	klog.Info("[Fluence] Delete Pod event handler")
 	pod := podObj.(*v1.Pod)
-	groupName, _ := f.pgMgr.GetPodGroup(context.TODO(), pod)
+	groupName, pg := f.pgMgr.GetPodGroup(context.TODO(), pod)
+
+	// If PodGroup is nil, still try to look up a faux name
+	if pg == nil {
+		pg = fgroup.CreateFakeGroup(pod)
+		groupName = pg.Name
+	}
 
 	klog.Infof("[Fluence] Delete pod %s in group %s has status %s", pod.Status.Phase, pod.Name, groupName)
 	switch pod.Status.Phase {

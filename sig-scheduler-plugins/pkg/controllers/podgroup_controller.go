@@ -123,7 +123,7 @@ func (r *PodGroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// TODO: Not clear what to do here. Arguably, we also want to check the label size
 		// because (in the future) we can accept smaller sizes. But then we also need
 		// to account for if the labels are different, do we take the smallest?
-		log.Info("PodGroup", "Status", fmt.Sprintf("WARNING: Pod group current MinMember %s does not match %d", pg.Spec.MinMember, size))
+		log.Info("PodGroup", "Status", fmt.Sprintf("WARNING: Pod group current MinMember %d does not match %d", pg.Spec.MinMember, size))
 	}
 	return r.updateStatus(ctx, pg, podList.Items)
 
@@ -192,6 +192,8 @@ func (r *PodGroupReconciler) updateStatus(
 
 	// Apply the patch to update, or delete if finished
 	// TODO would be better if owner references took here, so delete on owner deletion
+	// TODO deletion is not currently handled for Deployment, ReplicaSet, StatefulSet
+	// as they are expected to persist. You can delete / lose and bring up again
 	var err error
 	if pg.Status.Phase == schedv1alpha1.PodGroupFinished || pg.Status.Phase == schedv1alpha1.PodGroupFailed {
 		err = r.Delete(ctx, pg)

@@ -86,7 +86,10 @@ spec:
   backoffLimit: 4
 ```
 
-There is no reason pods with different names or under different abstractions cannot be part of the same group that needs to be scheduled together.
+There is no reason pods with different names or under different abstractions cannot be part of the same group that needs to be scheduled together. Also note that:
+
+- We currently do not allow scheduling to a control plane
+- Deployments, StatefulSets, and ReplicaSets can be scheduled and have pod groups created, however the pod groups are not cleaned up as these abstractions are not meant to complete.
 
 ### Deploy
 
@@ -520,7 +523,8 @@ kind create cluster --config ./kind-config.yaml
 #### TODO
 
  - Try what [kueue does](https://github.com/kubernetes-sigs/kueue/blob/6d57813a52066dab412735deeeb60ebb0cdb8e8e/cmd/kueue/main.go#L146-L155) to not require cert-manager.
- - Add other abstraction types to be intercepted (and labeled with sizes)
+ - Try other strategies for setting owner references (so cleans up when owner deleted)
+   - When that is done, add tests for deletion of pod group (the current method is not perfect and needs improvement)
 
 #### Components
 

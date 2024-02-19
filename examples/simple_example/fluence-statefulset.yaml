@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: example-statefulset
+  labels:
+    app: example-statefulset
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: example-statefulset
+  template:
+    metadata:
+      labels:
+        app: example-statefulset
+    spec:
+      schedulerName: fluence 
+      containers:
+      - name: example
+        image: rockylinux:9
+        command: ["sleep", "infinity"]

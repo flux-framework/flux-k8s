@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"net/http"
 
+	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
@@ -51,83 +52,127 @@ type fluenceWatcher struct {
 // not be added again).
 func (a *fluenceWatcher) Handle(ctx context.Context, req admission.Request) admission.Response {
 
-	logger.Info("Running webhook handle")
+	logger.Info("Running webhook handle, determining pod wrapper abstraction...")
 
-	// Try for a job first, which would be created before pods
 	job := &batchv1.Job{}
 	err := a.decoder.Decode(req, job)
-	if err != nil {
-
-		// Assume we operate on the level of pods for now
-		pod := &corev1.Pod{}
-		err := a.decoder.Decode(req, pod)
-
-		// Assume it's a pod group or something else.
-		// We aren't in charge of validating people's pods.
-		// I don't think we should ever hit this case, actually
+	if err == nil {
+		err = a.EnsureGroupOnJob(job)
 		if err != nil {
-			return admission.Allowed("Found non-pod, non-job, this webhook does not validate beyond those.")
-		}
-
-		// If we get here, we decoded a pod
-		err = a.EnsureGroup(pod)
-		if err != nil {
-			logger.Error(err, "Issue adding PodGroup to pod.")
+			logger.Error(err, "Issue adding PodGroup to Job")
 			return admission.Errored(http.StatusBadRequest, err)
 		}
-
-		// Send the updated pod to the events channel
-		//*a.events <- event.GenericEvent{Object: pod}
-		logger.Info("Admission pod success.")
-
-		marshalledPod, err := json.Marshal(pod)
+		marshalledJob, err := json.Marshal(job)
 		if err != nil {
-			logger.Error(err, "Marshalling pod error.")
+			logger.Error(err, "Marshalling job error.")
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
-
 		logger.Info("Admission job success.")
+		return admission.PatchResponseFromRaw(req.Object.Raw, marshalledJob)
+	}
+
+	pod := &corev1.Pod{}
+	err = a.decoder.Decode(req, pod)
+	if err == nil {
+		err = a.EnsureGroup(pod)
+		if err != nil {
+			logger.Error(err, "Issue adding PodGroup to Pod")
+			return admission.Errored(http.StatusBadRequest, err)
+		}
+		marshalledPod, err := json.Marshal(pod)
+		if err != nil {
+			logger.Error(err, "Marshalling pod error")
+			return admission.Errored(http.StatusInternalServerError, err)
+		}
+		logger.Info("Admission pod success")
 		return admission.PatchResponseFromRaw(req.Object.Raw, marshalledPod)
 	}
 
-	// If we get here, err was nil and we have a Job!
-	err = a.EnsureGroupOnJob(job)
-	if err != nil {
-		logger.Error(err, "Issue adding PodGroup to job.")
-		return admission.Errored(http.StatusBadRequest, err)
+	set := &appsv1.StatefulSet{}
+	err = a.decoder.Decode(req, set)
+	if err == nil {
+		err = a.EnsureGroupStatefulSet(set)
+		if err != nil {
+			logger.Error(err, "Issue adding PodGroup to StatefulSet")
+			return admission.Errored(http.StatusBadRequest, err)
+		}
+		marshalledSet, err := json.Marshal(set)
+		if err != nil {
+			logger.Error(err, "Marshalling StatefulSet error")
+			return admission.Errored(http.StatusInternalServerError, err)
+		}
+		logger.Info("Admission StatefulSet success")
+		return admission.PatchResponseFromRaw(req.Object.Raw, marshalledSet)
 	}
 
-	// Send the updated job to the events channel
-	//*a.events <- event.GenericEvent{Object: job}
-	logger.Info("Admission job success.")
-
-	marshalledJob, err := json.Marshal(job)
-	if err != nil {
-		logger.Error(err, "Marshalling job error.")
-		return admission.Errored(http.StatusInternalServerError, err)
+	d := &appsv1.Deployment{}
+	err = a.decoder.Decode(req, d)
+	if err == nil {
+		err = a.EnsureGroupDeployment(d)
+		if err != nil {
+			logger.Error(err, "Issue adding PodGroup to Deployment")
+			return admission.Errored(http.StatusBadRequest, err)
+		}
+		marshalledD, err := json.Marshal(d)
+		if err != nil {
+			logger.Error(err, "Marshalling Deployment error")
+			return admission.Errored(http.StatusInternalServerError, err)
+		}
+		logger.Info("Admission Deployment success")
+		return admission.PatchResponseFromRaw(req.Object.Raw, marshalledD)
 	}
 
-	logger.Info("Admission job success.")
-	return admission.PatchResponseFromRaw(req.Object.Raw, marshalledJob)
+	rset := &appsv1.ReplicaSet{}
+	err = a.decoder.Decode(req, rset)
+	if err == nil {
+		err = a.EnsureGroupReplicaSet(rset)
+		if err != nil {
+			logger.Error(err, "Issue adding PodGroup to ReplicaSet")
+			return admission.Errored(http.StatusBadRequest, err)
+		}
+		marshalledSet, err := json.Marshal(rset)
+		if err != nil {
+			logger.Error(err, "Marshalling StatefulSet error")
+			return admission.Errored(http.StatusInternalServerError, err)
+		}
+		logger.Info("Admission StatefulSet success")
+		return admission.PatchResponseFromRaw(req.Object.Raw, marshalledSet)
+	}
+
+	// We should not get down here
+	return admission.Allowed("Object not known, this webhook does not validate beyond those.")
+
 }
 
 // Default is the expected entrypoint for a webhook...
 // I don't remember if this is even called...
 func (a *fluenceWatcher) Default(ctx context.Context, obj runtime.Object) error {
-	job, ok := obj.(*batchv1.Job)
-	if !ok {
-		pod, ok := obj.(*corev1.Pod)
 
-		// This is adkin to an admission success - it's not a pod or job, so we don't care
-		// I don't think we should ever hit this case, actually
-		if !ok {
-			return nil
-		}
-		logger.Info(fmt.Sprintf("Pod %s is marked for fluence.", pod.Name))
+	switch obj.(type) {
+	case *batchv1.Job:
+		job := obj.(*batchv1.Job)
+		return a.EnsureGroupOnJob(job)
+
+	case *corev1.Pod:
+		pod := obj.(*corev1.Pod)
 		return a.EnsureGroup(pod)
+
+	case *appsv1.StatefulSet:
+		set := obj.(*appsv1.StatefulSet)
+		return a.EnsureGroupStatefulSet(set)
+
+	case *appsv1.Deployment:
+		d := obj.(*appsv1.Deployment)
+		return a.EnsureGroupDeployment(d)
+
+	case *appsv1.ReplicaSet:
+		set := obj.(*appsv1.ReplicaSet)
+		return a.EnsureGroupReplicaSet(set)
+
+	default:
+		// no match
 	}
-	logger.Info(fmt.Sprintf("Job %s is marked for fluence.", job.Name))
-	return a.EnsureGroupOnJob(job)
+	return nil
 }
 
 // EnsureGroup adds pod group label and size if not present
@@ -203,5 +248,90 @@ func (a *fluenceWatcher) EnsureGroupOnJob(job *batchv1.Job) error {
 	labelSize := fmt.Sprintf("%d", jobSize)
 	groupSize := getJobLabel(job, labels.PodGroupSizeLabel, labelSize)
 	job.Spec.Template.ObjectMeta.Labels[labels.PodGroupSizeLabel] = groupSize
+	return nil
+}
+
+// EnsureGroupStatefulSet creates a PodGroup for a StatefulSet
+func (a *fluenceWatcher) EnsureGroupStatefulSet(set *appsv1.StatefulSet) error {
+
+	// StatefulSet requires on top level explicitly
+	if set.Labels == nil {
+		set.Labels = map[string]string{}
+	}
+	defaultName := fmt.Sprintf("fluence-group-%s-%s", set.Namespace, set.Name)
+	groupName, ok := set.Labels[labels.PodGroupLabel]
+	if !ok {
+		groupName = defaultName
+	}
+	set.Spec.Template.ObjectMeta.Labels[labels.PodGroupLabel] = groupName
+
+	// Now do the same for the size, but the size is the size of the job
+	size := *set.Spec.Replicas
+	if size == int32(0) {
+		size = int32(1)
+	}
+	labelSize := fmt.Sprintf("%d", size)
+	groupSize, ok := set.Labels[labels.PodGroupSizeLabel]
+	if !ok {
+		groupSize = labelSize
+	}
+	set.Spec.Template.ObjectMeta.Labels[labels.PodGroupSizeLabel] = groupSize
+	return nil
+}
+
+// EnsureGroupStatefulSet creates a PodGroup for a StatefulSet
+func (a *fluenceWatcher) EnsureGroupReplicaSet(set *appsv1.ReplicaSet) error {
+
+	// StatefulSet requires on top level explicitly
+	if set.Labels == nil {
+		set.Labels = map[string]string{}
+	}
+	defaultName := fmt.Sprintf("fluence-group-%s-%s", set.Namespace, set.Name)
+	groupName, ok := set.Labels[labels.PodGroupLabel]
+	if !ok {
+		groupName = defaultName
+	}
+	set.Spec.Template.ObjectMeta.Labels[labels.PodGroupLabel] = groupName
+
+	// Now do the same for the size, but the size is the size of the job
+	size := *set.Spec.Replicas
+	if size == int32(0) {
+		size = int32(1)
+	}
+	labelSize := fmt.Sprintf("%d", size)
+	groupSize, ok := set.Labels[labels.PodGroupSizeLabel]
+	if !ok {
+		groupSize = labelSize
+	}
+	set.Spec.Template.ObjectMeta.Labels[labels.PodGroupSizeLabel] = groupSize
+	return nil
+}
+
+// EnsureGroupDeployment creates a PodGroup for a Deployment
+// This is redundant, can refactor later
+func (a *fluenceWatcher) EnsureGroupDeployment(d *appsv1.Deployment) error {
+
+	// StatefulSet requires on top level explicitly
+	if d.Labels == nil {
+		d.Labels = map[string]string{}
+	}
+	defaultName := fmt.Sprintf("fluence-group-%s-%s", d.Namespace, d.Name)
+	groupName, ok := d.Labels[labels.PodGroupLabel]
+	if !ok {
+		groupName = defaultName
+	}
+	d.Spec.Template.ObjectMeta.Labels[labels.PodGroupLabel] = groupName
+
+	// Now do the same for the size, but the size is the size of the job
+	size := *d.Spec.Replicas
+	if size == int32(0) {
+		size = int32(1)
+	}
+	labelSize := fmt.Sprintf("%d", size)
+	groupSize, ok := d.Labels[labels.PodGroupSizeLabel]
+	if !ok {
+		groupSize = labelSize
+	}
+	d.Spec.Template.ObjectMeta.Labels[labels.PodGroupSizeLabel] = groupSize
 	return nil
 }
