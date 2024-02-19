@@ -255,11 +255,18 @@ func (f *Fluence) AskFlux(
 	_, isAllocated := f.groupToJobId[groupName]
 	f.mutex.Unlock()
 
-	// Not allowing cancel for now - not sure how or why we could do this, need to better
-	// understand the case. This function should ONLY be successful on a new match allocate,
-	// otherwise the calling logic does not make sense.
+	// This case happens when there is some reason that an initial job pods partially allocated,
+	// but then the job restarted, and new pods are present but fluence had assigned nodes to
+	// the old ones (and there aren't enough). The job would have had to complete in some way,
+	// and the PodGroup would have to then recreate, and have the same job id (the group name).
+	// This happened when I cancalled a bunch of jobs and they didn't have the chance to
+	// cancel in fluence. What we can do here is assume the previous pods are no longer running
+	// and cancel the flux job to create again.
 	if isAllocated {
-		return fmt.Errorf("[Fluence] Pod %s in group %s is allocated and calling AskFlux, should we be here?\n", pod.Name, groupName)
+		klog.Info("Warning - group %s was previously allocated and is requesting again, so must have completed.", groupName)
+		f.mutex.Lock()
+		f.cancelFluxJob(groupName)
+		f.mutex.Unlock()
 	}
 
 	// IMPORTANT: this is a JobSpec for *one* pod, assuming they are all the same.
