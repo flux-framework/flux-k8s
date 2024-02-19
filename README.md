@@ -525,6 +525,7 @@ kind create cluster --config ./kind-config.yaml
  - Try what [kueue does](https://github.com/kubernetes-sigs/kueue/blob/6d57813a52066dab412735deeeb60ebb0cdb8e8e/cmd/kueue/main.go#L146-L155) to not require cert-manager.
  - Try other strategies for setting owner references (so cleans up when owner deleted)
    - When that is done, add tests for deletion of pod group (the current method is not perfect and needs improvement)
+- We really need to see the state of fluxion - I had this running for about 6 hours in kind, and at some point it just stopped working. I deleted and re-created the cluster and it was restored. It could be a development hiccup but would be good to know!
 
 #### Components
 

@@ -70,6 +70,8 @@ func (r *PodGroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	log.Info("reconciling flux-framework/fluence-controller for request")
 	pg := &schedv1alpha1.PodGroup{}
 
+	// Get the timestamp as soon as reconcile happens as a fallback below
+	timestamp := metav1.NewMicroTime(time.Now())
 	if err := r.Get(ctx, req.NamespacedName, pg); err != nil {
 
 		// Case 1: if we get here and it's not found, assume not created
@@ -110,14 +112,20 @@ func (r *PodGroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
+	// If the scheduler time created is Zero (not set) we set it here
+	if pg.Status.ScheduleStartTime.IsZero() {
+		return r.setTimeCreated(ctx, pg, podList.Items, timestamp)
+	}
+
 	// Inspect the size, set on the group if not done yet
 	size := len(podList.Items)
 	log.Info("PodGroup", "Name", pg.Name, "Size", size)
 
 	// When first created, size should be unset (MinMember)
+	// Get size label from the first pod
 	if int(pg.Spec.MinMember) == 0 {
 		log.Info("PodGroup", "Status", fmt.Sprintf("Pod group %s updating size to %d", pg.Name, size))
-		return r.updatePodGroupSize(ctx, pg, int32(size))
+		return r.updatePodGroupSize(ctx, pg, int32(size), podList.Items)
 
 	} else if int(pg.Spec.MinMember) != size {
 		// TODO: Not clear what to do here. Arguably, we also want to check the label size
@@ -128,6 +136,39 @@ func (r *PodGroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	return r.updateStatus(ctx, pg, podList.Items)
 
 }
+
+func (r *PodGroupReconciler) setTimeCreated(
+	ctx context.Context,
+	pg *schedv1alpha1.PodGroup,
+	pods []v1.Pod,
+	timestamp metav1.MicroTime,
+) (ctrl.Result, error) {
+
+	// First priority goes to annotation, if set
+	if len(pods) > 0 {
+
+		strTime, ok := pods[0].Labels[fluenceLabels.PodGroupTimeCreated]
+		if ok {
+			mt := metav1.MicroTime{}
+			b := []byte(strTime)
+			err := mt.UnmarshalJSON(b)
+			if err == nil {
+				timestamp = mt
+			}
+		}
+	}
+
+	// Now patch to update it
+	patch := client.MergeFrom(pg.DeepCopy())
+	pg.Status.ScheduleStartTime = timestamp
+
+	// Apply the patch to update the size
+	r.Status().Update(ctx, pg)
+	err := r.Patch(ctx, pg, patch)
+	return ctrl.Result{Requeue: true}, err
+
+}
+
 func (r *PodGroupReconciler) updateStatus(
 	ctx context.Context,
 	pg *schedv1alpha1.PodGroup,
@@ -206,6 +247,8 @@ func (r *PodGroupReconciler) updateStatus(
 
 // newPodGroup creates a new podGroup object, capturing the creation time
 // This should be followed by a request to reconsile it
+// I'm not sure this actually takes, because the metadata (spec)
+// does not stick
 func (r *PodGroupReconciler) newPodGroup(
 	ctx context.Context,
 	name, namespace string,
@@ -217,8 +260,7 @@ func (r *PodGroupReconciler) newPodGroup(
 			Name:      name,
 			Namespace: namespace,
 		},
-		// Note that we don't know the size yet
-		// The most important thing here is the MicroTime!
+		// Note that these don't really stick
 		Spec: schedv1alpha1.PodGroupSpec{
 			MinMember: groupSize,
 		},
@@ -226,15 +268,12 @@ func (r *PodGroupReconciler) newPodGroup(
 			ScheduleStartTime: metav1.NewMicroTime(time.Now()),
 		},
 	}
-	// TODO need to set a controller reference?
-	// ctrl.SetControllerReference(cluster, job, r.Scheme)
+
 	err := r.Create(ctx, pg)
 	if err != nil {
 		r.log.Error(err, "Failed to create new PodGroup", "Namespace:", pg.Namespace, "Name:", pg.Name)
-		return pg, err
 	}
-	// Successful - return and requeue
-	return pg, nil
+	return pg, err
 
 }
 
@@ -257,8 +296,19 @@ func (r *PodGroupReconciler) updatePodGroupSize(
 	ctx context.Context,
 	old *schedv1alpha1.PodGroup,
 	size int32,
+	pods []v1.Pod,
 ) (ctrl.Result, error) {
 
+	// First priority goes to annotation, if set
+	if len(pods) > 0 {
+		rawSize := pods[0].Labels[fluenceLabels.PodGroupSizeLabel]
+		groupSize, err := strconv.ParseInt(rawSize, 10, 32)
+		if err == nil {
+			size = int32(groupSize)
+		}
+	}
+
+	// Now patch to update it
 	patch := client.MergeFrom(old.DeepCopy())
 	old.Spec.MinMember = size
 
@@ -385,11 +435,10 @@ func (r *PodGroupReconciler) ensurePodGroup(ctx context.Context, obj client.Obje
 		if apierrs.IsNotFound(err) {
 			r.log.Info("Pod: ", "Status", pod.Status.Phase, "Name", pod.Name, "Group", groupName, "Namespace", pod.Namespace, "Action", "Creating PodGroup")
 
-			//owner := r.getOwnerMetadata(pod)
-
-			// TODO should an owner be set here? Setting to a specific pod seems risky/wrong in case deleted.
-			err, _ := r.newPodGroup(ctx, groupName, pod.Namespace, int32(groupSize))
-			if err != nil {
+			// Note that most of this does not stick - we have to get metadata later from pods
+			// Or just use a hiuristic (e.g., take the first pod or use reconciler first hit time)
+			_, err := r.newPodGroup(ctx, groupName, pod.Namespace, int32(groupSize))
+			if err == nil {
 				return []ctrl.Request{{NamespacedName: namespacedName}}
 			}
 			r.log.Info("Pod: ", "Status", pod.Status.Phase, "Name", pod.Name, "Group", groupName, "Namespace", pod.Namespace, "Action", "Issue Creating PodGroup")

@@ -1,5 +1,29 @@
 # Development Notes
 
+## Design
+
+![images/fluence-design.png](images/fluence-design.png)
+
+The picture above shows the fluence custom scheduler, which uses the Flux Framework component "fluxion" Go bindings in a custom Kubernetes scheduler. In the above, we see two pods running in a Kubernetes cluster that are intended for scheduling. The fluence pod (beige) has the fluence-sidecar and the fluence-scheduler, 2 containers. The controller pod has the fluence controller (1 container). Generally speaking, the containers are responsible for the following:
+
+- **fluence-controller**: watches for incoming pods and abstractions with pods (e.g., job) to create corresponding pod groups with names, sizes, and timestamps
+- **fluence-scheduler**: provides the expected scheduling plugin with functions to sort, pre-filter, etc. the queue of pods is essentially moving through here
+- **fluence-sidecar**: the fluxion GRPC service that is queried by the fluence-scheduler to request an allocation for a pod group
+
+Both the controller and scheduler logic are bootstrapped from the same underlying kubernetes-sigs project, the scheduler-plugins, despite being in different pods (green). For steps, scheduling works as follows. Note that it is [much more complicated than this](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/), but we explain the high level details.
+
+1. A user submits a job to their cluster with kubectl after installing fluence with helm charts.
+2. The mutating webhook provided by the fluence-controller intercepts the job and adds labels
+3. The controller for PodGroup (an abstraction that holds a name, size, and time created to describe one or more pods) is watching for pod events
+4. When a pod is creating (it shows up as Pending or other in the cluster, and doesn't have to be scheduled yet) it starts to reconcile
+5. The reconcile ensures that the PodGroup is created and updated with the correct metadata and statuses (and cleaned up when the time comes)
+6. As soon as the Pod is pending and the group exists, it starts going through the scheduling queue and hits the fluence-scheduler endpoints
+7. The fluence-scheduler uses the PodGroup name to associate each individual pod with a group and start time, allowing to sort them together
+8. They are sorted together, down to the MicroSecond, and Created to run on the cluster
+9. When the top level abstraction cleans up and the PodGroup size is equal to the number of pods finished or failed, the PodGroup cleans up
+
+The result is (hopefully) a smooth and efficient scheduling experience. We are still working on it.
+
 ## Thinking
 
 > Updated February 15, 2024
