@@ -26,6 +26,7 @@ webhooks:
   - apiGroups:
     - ""
     - core
+    - apps
     - batch
     - scheduling.x-k8s.io
     apiVersions:
@@ -36,6 +37,10 @@ webhooks:
     resources:
     - pods
     - jobs
+    - statefulsets
+    - deployments
+    - replicasets
+
 # Can uncomment this if we want to mutate the pod groups after creation
 #    - podgroups
   sideEffects: None
