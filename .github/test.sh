@@ -18,6 +18,8 @@ cd upstream/manifests/install/charts
 helm install \
   --set scheduler.image=ghcr.io/flux-framework/fluence:latest \
   --set scheduler.sidecarimage=ghcr.io/flux-framework/fluence-sidecar:latest \
+  --set controller.image=ghcr.io/flux-framework/fluence-controller:latest \
+  --set controller.pullPolicy=Never \
   --set scheduler.pullPolicy=Never \
   --set scheduler.sidecarPullPolicy=Never \
     schedscheduler-plugins as-a-second-scheduler/

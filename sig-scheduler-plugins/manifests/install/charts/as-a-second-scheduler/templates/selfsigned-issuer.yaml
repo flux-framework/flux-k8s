@@ -1,0 +1,10 @@
+{{- if .Values.enableCertManager }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "scheduler-plugins-as-a-second-scheduler.fullname" . }}-selfsigned-issuer
+  labels:
+  {{- include "scheduler-plugins-as-a-second-scheduler.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+{{- end}}

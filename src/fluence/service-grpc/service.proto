@@ -1,0 +1,34 @@
+syntax = "proto3";
+option go_package = "grpc/service";
+
+package service;
+
+
+// Service definition for an external plugin like kubectl
+service ExternalPluginService {
+
+    // This is supported via a shared file in the container
+    rpc GetResources(ResourceRequest) returns (ResourceResponse) {}
+
+    // Note we currently cannot support getting group metadata, need to add handle to get info, etc.
+    rpc ListGroups(GroupRequest) returns (GroupResponse) {}
+    rpc GetGroup(GroupRequest) returns (GroupResponse) {}
+}
+
+// GroupRequest for a group
+message GroupRequest {
+    string group = 1;
+}
+
+// GroupResponse
+message GroupResponse {
+    string name = 1;
+    int64 size = 2;
+}
+
+message ResourceRequest {}
+message ResourceResponse {
+    string graph = 1;
+}
+
+

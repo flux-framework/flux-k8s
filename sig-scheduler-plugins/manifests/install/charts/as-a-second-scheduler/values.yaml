@@ -11,12 +11,19 @@ scheduler:
   policy: lonode
   pullPolicy: Always
   sidecarPullPolicy: Always
+  loggingLevel: "9"
+
+  # Port is for GRPC, and enabling the external service will also
+  # create the service and ingress to it, along with adding
+  # additional API endpoints for our TBA kubectl plugin
+  enableExternalService: false
+  port: 4242
 
 controller:
   name: scheduler-plugins-controller
-  image: registry.k8s.io/scheduler-plugins/controller:v0.27.8
+  image: ghcr.io/flux-framework/fluence-controller:latest
   replicaCount: 1
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
 # LoadVariationRiskBalancing and TargetLoadPacking are not enabled by default
 # as they need extra RBAC privileges on metrics.k8s.io.
@@ -37,3 +44,12 @@ pluginConfig:
 #   args:
 #     scoringStrategy:
 #       type: MostAllocated # default is LeastAllocated
+
+enableCertManager: true
+kubernetesClusterDomain: cluster.local
+webhookService:
+  ports:
+  - port: 9443
+    protocol: TCP
+    targetPort: 9443
+  type: ClusterIP

@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: example-replicaset
+  labels:
+    app: example-replicaset
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: example-replicaset
+  template:
+    metadata:
+      labels:
+        app: example-replicaset
+    spec:
+      schedulerName: fluence 
+      containers:
+      - name: example
+        image: rockylinux:9
+        command: ["sleep", "infinity"]

@@ -18,7 +18,7 @@ jobs:
     name: build fluence
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-go@v3
+    - uses: actions/setup-go@v4
       with:
         go-version: ^1.19
 
@@ -45,7 +45,44 @@ jobs:
     - name: Deploy Container
       if: (github.event_name != 'pull_request')
       run: docker push ${{ env.container }} --all-tags
-      
+
+  build-controller:
+    permissions:
+      packages: write
+    env:
+      container: ghcr.io/flux-framework/fluence-controller
+    runs-on: ubuntu-latest
+    name: build fluence-controller
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v4
+      with:
+        go-version: ^1.19
+
+    - name: Build Containers
+      run: |
+        make prepare
+        make build REGISTRY=ghcr.io/flux-framework CONTROLLER_IMAGE=fluence-controller
+
+    - name: Tag Release Image
+      if: (github.event_name == 'release')
+      run: |
+        tag=${GITHUB_REF#refs/tags/}
+        echo "Tagging and releasing ${{ env.container}}:${tag}"        
+        docker tag ${{ env.container }}:latest ${{ env.container }}:${tag}
+
+    - name: GHCR Login
+      if: (github.event_name != 'pull_request')
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Deploy Container
+      if: (github.event_name != 'pull_request')
+      run: docker push ${{ env.container }} --all-tags
+
   build-sidecar:
     permissions:
       packages: write
@@ -55,7 +92,7 @@ jobs:
     name: build sidecar
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-go@v3
+    - uses: actions/setup-go@v4
       with:
         go-version: ^1.19
 
