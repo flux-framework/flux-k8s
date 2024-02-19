@@ -16,11 +16,14 @@ Both the controller and scheduler logic are bootstrapped from the same underlyin
 2. The mutating webhook provided by the fluence-controller intercepts the job and adds labels
 3. The controller for PodGroup (an abstraction that holds a name, size, and time created to describe one or more pods) is watching for pod events
 4. When a pod is creating (it shows up as Pending or other in the cluster, and doesn't have to be scheduled yet) it starts to reconcile
-5. The reconcile ensures that the PodGroup is created and updated with the correct metadata and statuses (and cleaned up when the time comes)
-6. As soon as the Pod is pending and the group exists, it starts going through the scheduling queue and hits the fluence-scheduler endpoints
-7. The fluence-scheduler uses the PodGroup name to associate each individual pod with a group and start time, allowing to sort them together
-8. They are sorted together, down to the MicroSecond, and Created to run on the cluster
-9. When the top level abstraction cleans up and the PodGroup size is equal to the number of pods finished or failed, the PodGroup cleans up
+  - The reconcile ensures that the PodGroup is created and updated with the correct metadata and statuses (and cleaned up when the time comes)
+5. As soon as the Pod is pending and the group exists, it starts going through the scheduling [queue and process](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/) and hits the fluence-scheduler endpoints
+  - The fluence-scheduler uses the PodGroup name to associate each individual pod with a group and start time, allowing to sort them together
+  - Starting times are based on micro seconds to provide a distinct-ness to group creation times, even when done en-masse
+  - Pods that don't get have a group (if there is delay in the reconciler making one) are pushed off from scheduling until they do.
+6. Fluxion is queried via a GRPC endpoint, asking for a match for the job specification and an allocation -- "MatchAllocate"
+7. The pods are then scheduled together, and the abstraction (e.g., Job) created in the Kubernetes cluster
+  - When the top level abstraction cleans up and the PodGroup size is equal to the number of pods finished or failed, the PodGroup cleans up
 
 The result is (hopefully) a smooth and efficient scheduling experience. We are still working on it.
 

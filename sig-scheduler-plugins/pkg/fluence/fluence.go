@@ -166,33 +166,28 @@ func (f *Fluence) PreFilter(
 	// a user defined group. This is a size 1 group we handle equivalently.
 	groupName, pg := f.pgMgr.GetPodGroup(ctx, pod)
 
-	// Not scheduled by fluence - we have no idea about groups or sizes, just ask for one
+	// If we don't have a pod group and it's here, it was asked to be scheduled by fluence
+	// but the group isn't ready. Unshedulable for now.
 	if pg == nil {
-		klog.Infof("[Fluence] Unknown request to schedule %s yet, asking Fluxion for one node", pod.Name)
-		pg = fgroup.CreateFakeGroup(pod)
-		err := f.AskFlux(ctx, pod, pg, pg.Name)
+		klog.Infof("[Fluence] Group %s/%s does not have a pod group, not schedulable yet.", pod.Namespace, pod.Name)
+		return nil, framework.NewStatus(framework.Unschedulable, "Missing podgroup")
+	}
+	klog.Infof("[Fluence] Pod %s is in group %s with minimum members %d", pod.Name, groupName, pg.Spec.MinMember)
+
+	// Has this podgroup been seen by fluence yet? If yes, we will have it in the cache
+	cache := fcore.GetFluenceCache(groupName)
+	klog.Infof("[Fluence] cache %s", cache)
+
+	// Fluence has never seen this before, we need to schedule an allocation
+	// It also could have been seen, but was not able to get one.
+	if cache == nil {
+		klog.Infof("[Fluence] Does not have nodes for %s yet, asking Fluxion", groupName)
+
+		// groupName is the namespaced name <namespace>/<name>
+		err := f.AskFlux(ctx, pod, pg, groupName)
 		if err != nil {
 			klog.Infof("[Fluence] Fluxion returned an error %s, not schedulable", err.Error())
 			return nil, framework.NewStatus(framework.Unschedulable, err.Error())
-		}
-	} else {
-		klog.Infof("[Fluence] Pod %s is in group %s with minimum members %d", pod.Name, groupName, pg.Spec.MinMember)
-
-		// Has this podgroup been seen by fluence yet? If yes, we will have it in the cache
-		cache := fcore.GetFluenceCache(groupName)
-		klog.Infof("[Fluence] cache %s", cache)
-
-		// Fluence has never seen this before, we need to schedule an allocation
-		// It also could have been seen, but was not able to get one.
-		if cache == nil {
-			klog.Infof("[Fluence] Does not have nodes for %s yet, asking Fluxion", groupName)
-
-			// groupName is the namespaced name <namespace>/<name>
-			err := f.AskFlux(ctx, pod, pg, groupName)
-			if err != nil {
-				klog.Infof("[Fluence] Fluxion returned an error %s, not schedulable", err.Error())
-				return nil, framework.NewStatus(framework.Unschedulable, err.Error())
-			}
 		}
 	}
 
