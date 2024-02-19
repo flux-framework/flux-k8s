@@ -1,19 +1,3 @@
-/*
-Copyright 2022 The Kubernetes Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package fluence
 
 import (
@@ -32,7 +16,7 @@ import (
 	clientscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/cache"
 	corev1helpers "k8s.io/component-helpers/scheduling/corev1"
-	"k8s.io/klog/v2"
+	klog "k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -49,12 +33,9 @@ type Fluence struct {
 	handle framework.Handle
 	client client.Client
 
-	// Important: I tested moving this into the group, but it's a bad idea because
-	// we need to delete the group after the last allocation is given, and then we
-	// no longer have the ID. It might be a better approach to delete it elsewhere
-	// (but I'm not sure where that elsewhere could be)
-	podNameToJobId map[string]uint64
-	pgMgr          coschedulingcore.Manager
+	// Store jobid on the level of a group (which can be a single pod)
+	groupToJobId map[string]uint64
+	pgMgr        coschedulingcore.Manager
 }
 
 // Name is the name of the plugin used in the Registry and configurations.
@@ -79,7 +60,7 @@ func (f *Fluence) Name() string {
 // https://github.com/kubernetes-sigs/scheduler-plugins/blob/master/pkg/coscheduling/coscheduling.go#L63
 func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 
-	f := &Fluence{handle: handle, podNameToJobId: make(map[string]uint64)}
+	f := &Fluence{handle: handle, groupToJobId: make(map[string]uint64)}
 
 	ctx := context.TODO()
 	fcore.Init()
@@ -106,7 +87,7 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 
 	fieldSelector, err := fields.ParseSelector(",status.phase!=" + string(v1.PodSucceeded) + ",status.phase!=" + string(v1.PodFailed))
 	if err != nil {
-		klog.ErrorS(err, "ParseSelector failed")
+		klog.Errorf("ParseSelector failed %s", err)
 		os.Exit(1)
 	}
 
@@ -116,6 +97,7 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 	podInformer := informerFactory.Core().V1().Pods()
 	scheduleTimeDuration := time.Duration(500) * time.Second
 
+	// https://github.com/kubernetes-sigs/scheduler-plugins/blob/master/pkg/coscheduling/core/core.go#L84
 	pgMgr := coschedulingcore.NewPodGroupManager(
 		k8scli,
 		handle.SnapshotSharedLister(),
@@ -141,34 +123,27 @@ func New(_ runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 
 // Less is used to sort pods in the scheduling queue in the following order.
 // 1. Compare the priorities of Pods.
-// 2. Compare the initialization timestamps of fluence pod groups
-// 3. Fall back, sort by namespace/name
-// See 	https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/
-// Less is part of Sort, which is the earliest we can see a pod unless we use gate
-// IMPORTANT: Less sometimes is not called for smaller sizes, not sure why.
-// To get around this we call it during PreFilter too.
+// 2. Compare the initialization timestamps of PodGroups or Pods.
+// 3. Compare the keys of PodGroups/Pods: <namespace>/<podname>.
 func (f *Fluence) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
-	klog.Infof("[Fluence] Ordering pods in Less")
-
-	// ensure we have a PodGroup no matter what
-	klog.Infof("[Fluence] Comparing %s and %s", podInfo1.Pod.Name, podInfo2.Pod.Name)
-	podGroup1 := fgroup.EnsureFluenceGroup(podInfo1.Pod)
-	podGroup2 := fgroup.EnsureFluenceGroup(podInfo2.Pod)
-
-	// First preference to priority, but only if they are different
+	klog.Infof("ordering pods in fluence scheduler plugin")
 	prio1 := corev1helpers.PodPriority(podInfo1.Pod)
 	prio2 := corev1helpers.PodPriority(podInfo2.Pod)
-
-	// ...and only allow this to sort if they aren't the same
-	// The assumption here is that pods with priority are ignored by fluence
 	if prio1 != prio2 {
 		return prio1 > prio2
 	}
 
+	// Important: this GetPodGroup returns the first name as the Namespaced one,
+	// which is what fluence needs to distinguish between namespaces. Just the
+	// name could be replicated between different namespaces
+	ctx := context.TODO()
+	name1, podGroup1 := f.pgMgr.GetPodGroup(ctx, podInfo1.Pod)
+	name2, podGroup2 := f.pgMgr.GetPodGroup(ctx, podInfo2.Pod)
+
 	// Fluence can only compare if we have two known groups.
 	// This tries for that first, and falls back to the initial attempt timestamp
-	creationTime1 := fgroup.GetCreationTimestamp(podGroup1, podInfo1)
-	creationTime2 := fgroup.GetCreationTimestamp(podGroup2, podInfo2)
+	creationTime1 := fgroup.GetCreationTimestamp(name1, podGroup1, podInfo1)
+	creationTime2 := fgroup.GetCreationTimestamp(name2, podGroup2, podInfo2)
 
 	// If they are the same, fall back to sorting by name.
 	if creationTime1.Equal(&creationTime2) {
@@ -178,7 +153,7 @@ func (f *Fluence) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
 }
 
 // PreFilter checks info about the Pod / checks conditions that the cluster or the Pod must meet.
-// This still comes after sort
+// This comes after sort
 func (f *Fluence) PreFilter(
 	ctx context.Context,
 	state *framework.CycleState,
@@ -189,31 +164,46 @@ func (f *Fluence) PreFilter(
 
 	// groupName will be named according to the single pod namespace / pod if there wasn't
 	// a user defined group. This is a size 1 group we handle equivalently.
-	pg := fgroup.GetPodsGroup(pod)
+	groupName, pg := f.pgMgr.GetPodGroup(ctx, pod)
+	klog.Infof("[Fluence] Pod %s is in group %s with minimum members %d", pod.Name, groupName, pg.Spec.MinMember)
 
-	klog.Infof("[Fluence] Pod %s group size %d", pod.Name, pg.Size)
-	klog.Infof("[Fluence] Pod %s group name is %s", pod.Name, pg.Name)
+	// Has this podgroup been seen by fluence yet? If yes, we will have it in the cache
+	cache := fcore.GetFluenceCache(groupName)
+	klog.Infof("[Fluence] cache %s", cache)
 
-	// Note that it is always the case we have a group
-	// We have not yet derived a node list
-	if !pg.HavePodNodes() {
-		klog.Infof("[Fluence] Does not have nodes yet, asking Fluxion")
-		err := f.AskFlux(ctx, pod, int(pg.Size))
+	// Fluence has never seen this before, we need to schedule an allocation
+	// It also could have been seen, but was not able to get one.
+	if cache == nil {
+		klog.Infof("[Fluence] Does not have nodes for %s yet, asking Fluxion", groupName)
+
+		// groupName is the namespaced name <namespace>/<name>
+		err := f.AskFlux(ctx, pod, pg, groupName)
 		if err != nil {
 			klog.Infof("[Fluence] Fluxion returned an error %s, not schedulable", err.Error())
 			return nil, framework.NewStatus(framework.Unschedulable, err.Error())
 		}
 	}
-	nodename, err := fcore.GetNextNode(pg.Name)
-	klog.Infof("Node Selected %s (%s:%s)", nodename, pod.Name, pg.Name)
+
+	// We can only get here if an allocation is done (and there is no error above)
+	// The cache would only originally be nil if we didn't do that yet. It should
+	// always be defined (not nil) when we get here
+	cache = fcore.GetFluenceCache(groupName)
+
+	// This is the next node in the list
+	nodename, err := fcore.GetNextNode(groupName)
 	if err != nil {
 		return nil, framework.NewStatus(framework.Unschedulable, err.Error())
 	}
+	klog.Infof("Node Selected %s (pod %s:group %s)", nodename, pod.Name, groupName)
 
-	// Create a fluxState (CycleState) with things that might be useful/
-	klog.Info("Node Selected: ", nodename)
-	cache := fcore.NodeCache{NodeName: nodename}
-	state.Write(framework.StateKey(pod.Name), &fcore.FluxStateData{NodeCache: cache})
+	// Create a fluxState (CycleState) with things that might be useful
+	// This isn't a PodGroupCache, but a single node cache, which also
+	// has group information, but just is for one node. Note that assigned
+	// tasks is hard coded to 1 but this isn't necessarily the case - we should
+	// eventually be able to GetNextNode for a number of tasks, for example
+	// (unless task == pod in which case it is always 1)
+	nodeCache := fcore.NodeCache{NodeName: nodename, GroupName: groupName, AssignedTasks: 1}
+	state.Write(framework.StateKey(pod.Name), &fcore.FluxStateData{NodeCache: nodeCache})
 	return nil, framework.NewStatus(framework.Success, "")
 }
 
@@ -226,8 +216,16 @@ func (f *Fluence) Filter(
 ) *framework.Status {
 
 	klog.Info("Filtering input node ", nodeInfo.Node().Name)
-	if v, e := cycleState.Read(framework.StateKey(pod.Name)); e == nil {
-		if value, ok := v.(*fcore.FluxStateData); ok && value.NodeCache.NodeName != nodeInfo.Node().Name {
+	state, err := cycleState.Read(framework.StateKey(pod.Name))
+
+	// No error means we retrieved the state
+	if err == nil {
+
+		// Try to convert the state to FluxStateDate
+		value, ok := state.(*fcore.FluxStateData)
+
+		// If we have state data that isn't equal to the current assignment, no go
+		if ok && value.NodeCache.NodeName != nodeInfo.Node().Name {
 			return framework.NewStatus(framework.Unschedulable, "pod is not permitted")
 		} else {
 			klog.Infof("Filter: node %s selected for %s\n", value.NodeCache.NodeName, pod.Name)
@@ -243,24 +241,33 @@ func (f *Fluence) PreFilterExtensions() framework.PreFilterExtensions {
 }
 
 // AskFlux will ask flux for an allocation for nodes for the pod group.
-func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, count int) error {
+func (f *Fluence) AskFlux(
+	ctx context.Context,
+	pod *v1.Pod,
+	pg *sched.PodGroup,
+	groupName string,
+) error {
+
 	// clean up previous match if a pod has already allocated previously
 	f.mutex.Lock()
-	_, isPodAllocated := f.podNameToJobId[pod.Name]
+	_, isAllocated := f.groupToJobId[groupName]
 	f.mutex.Unlock()
 
-	if isPodAllocated {
-		klog.Infof("[Fluence] Pod %s is allocated, cleaning up previous allocation\n", pod.Name)
-		f.mutex.Lock()
-		f.cancelFluxJobForPod(pod)
-		f.mutex.Unlock()
+	// Not allowing cancel for now - not sure how or why we could do this, need to better
+	// understand the case. This function should ONLY be successful on a new match allocate,
+	// otherwise the calling logic does not make sense.
+	if isAllocated {
+		return fmt.Errorf("[Fluence] Pod %s in group %s is allocated and calling AskFlux, should we be here?\n", pod.Name, groupName)
 	}
 
-	// Does the task name here matter? We are naming the entire group for the pod
-	jobspec := utils.InspectPodInfo(pod)
+	// IMPORTANT: this is a JobSpec for *one* pod, assuming they are all the same.
+	// This obviously may not be true if we have a hetereogenous PodGroup.
+	// We name it based on the group, since it will represent the group
+	jobspec := utils.PreparePodJobSpec(pod, groupName)
 	klog.Infof("[Fluence] Inspect pod info, jobspec: %s\n", jobspec)
 	conn, err := grpc.Dial("127.0.0.1:4242", grpc.WithInsecure())
 
+	// TODO change this to just return fmt.Errorf
 	if err != nil {
 		klog.Errorf("[Fluence] Error connecting to server: %v\n", err)
 		return err
@@ -274,154 +281,34 @@ func (f *Fluence) AskFlux(ctx context.Context, pod *v1.Pod, count int) error {
 	request := &pb.MatchRequest{
 		Ps:      jobspec,
 		Request: "allocate",
-		Count:   int32(count)}
+		Count:   pg.Spec.MinMember,
+	}
 
-	// Question from vsoch; Why return err instead of err2 here?
-	// err would return a nil value, but we need to return non nil,
-	// otherwise it's going to try to use the allocation (but there is none)
+	// An error here is an error with making the request
 	r, err := grpcclient.Match(context.Background(), request)
 	if err != nil {
 		klog.Errorf("[Fluence] did not receive any match response: %v\n", err)
 		return err
 	}
 
-	klog.Infof("[Fluence] response podID %s\n", r.GetPodID())
-
-	// Presence of a podGroup is indicated by a groupName
-	// Flag that the group is allocated (yes we also have the job id, testing for now)
-	pg := fgroup.GetPodsGroup(pod)
+	// TODO GetPodID should be renamed, because it will reflect the group
+	klog.Infof("[Fluence] Match response ID %s\n", r.GetPodID())
 
 	// Get the nodelist and inspect
 	nodes := r.GetNodelist()
 	klog.Infof("[Fluence] Nodelist returned from Fluxion: %s\n", nodes)
 
-	nodelist := fcore.CreateNodePodsList(nodes, pg.Name)
-	klog.Infof("[Fluence] parsed node pods list %s\n", nodelist)
-	jobid := uint64(r.GetJobID())
+	// Assign the nodelist - this sets the group name in the groupSeen cache
+	// at this point, we can retrieve the cache and get nodes
+	nodelist := fcore.CreateNodeList(nodes, groupName)
 
+	jobid := uint64(r.GetJobID())
+	klog.Infof("[Fluence] parsed node pods list %s for job id %d\n", nodelist, jobid)
+
+	// TODO would be nice to actually be able to ask flux jobs -a to fluence
+	// That way we can verify assignments, etc.
 	f.mutex.Lock()
-	f.podNameToJobId[pod.Name] = jobid
-	klog.Infof("[Fluence] Check job assignment: %s\n", f.podNameToJobId)
+	f.groupToJobId[groupName] = jobid
 	f.mutex.Unlock()
 	return nil
-}
-
-// cancelFluxJobForPod cancels the flux job for a pod.
-// We assume that the cancelled job also means deleting the pod group
-func (f *Fluence) cancelFluxJobForPod(pod *v1.Pod) error {
-	jobid := f.podNameToJobId[pod.Name]
-
-	klog.Infof("[Fluence] Cancel flux job: %v for pod %s", jobid, pod.Name)
-
-	conn, err := grpc.Dial("127.0.0.1:4242", grpc.WithInsecure())
-
-	if err != nil {
-		klog.Errorf("[Fluence] Error connecting to server: %v", err)
-		return err
-	}
-	defer conn.Close()
-
-	grpcclient := pb.NewFluxcliServiceClient(conn)
-	_, cancel := context.WithTimeout(context.Background(), 200*time.Second)
-	defer cancel()
-
-	// I think this error reflects the success or failure of the cancel request
-	request := &pb.CancelRequest{JobID: int64(jobid)}
-	res, err := grpcclient.Cancel(context.Background(), request)
-	if err != nil {
-		klog.Errorf("[Fluence] did not receive any cancel response: %v", err)
-		return err
-	}
-	klog.Infof("[Fluence] Job cancellation for pod %s result: %d", pod.Name, res.Error)
-
-	// And this error is if the cancel was successful or not
-	if res.Error == 0 {
-		klog.Infof("[Fluence] Successful cancel of flux job: %v for pod %s", jobid, pod.Name)
-		delete(f.podNameToJobId, pod.Name)
-
-		// If we are successful, clear the group allocated nodes
-		fgroup.DeleteFluenceGroup(pod)
-	} else {
-		klog.Warningf("[Fluence] Failed to cancel flux job %v for pod %s", jobid, pod.Name)
-	}
-	return nil
-}
-
-// EventHandlers updatePod handles cleaning up resources
-func (f *Fluence) updatePod(oldObj, newObj interface{}) {
-
-	oldPod := oldObj.(*v1.Pod)
-	newPod := newObj.(*v1.Pod)
-
-	klog.Infof("[Fluence] Processing event for pod %s from %s to %s", newPod.Name, newPod.Status.Phase, oldPod.Status.Phase)
-
-	switch newPod.Status.Phase {
-	case v1.PodPending:
-		// in this state we don't know if a pod is going to be running, thus we don't need to update job map
-	case v1.PodRunning:
-		// if a pod is start running, we can add it state to the delta graph if it is scheduled by other scheduler
-	case v1.PodSucceeded:
-		klog.Infof("[Fluence] Pod %s succeeded, Fluence needs to free the resources", newPod.Name)
-
-		f.mutex.Lock()
-		defer f.mutex.Unlock()
-
-		if _, ok := f.podNameToJobId[newPod.Name]; ok {
-			f.cancelFluxJobForPod(newPod)
-		} else {
-			klog.Infof("[Fluence] Succeeded pod %s/%s doesn't have flux jobid", newPod.Namespace, newPod.Name)
-		}
-	case v1.PodFailed:
-		// a corner case need to be tested, the pod exit code is not 0, can be created with segmentation fault pi test
-		klog.Warningf("[Fluence] Pod %s failed, Fluence needs to free the resources", newPod.Name)
-
-		f.mutex.Lock()
-		defer f.mutex.Unlock()
-
-		if _, ok := f.podNameToJobId[newPod.Name]; ok {
-			f.cancelFluxJobForPod(newPod)
-		} else {
-			klog.Errorf("[Fluence] Failed pod %s/%s doesn't have flux jobid", newPod.Namespace, newPod.Name)
-		}
-	case v1.PodUnknown:
-		// don't know how to deal with it as it's unknown phase
-	default:
-		// shouldn't enter this branch
-	}
-}
-
-// deletePod handles the delete event handler
-// TODO when should we clear group from the cache?
-func (f *Fluence) deletePod(podObj interface{}) {
-	klog.Info("[Fluence] Delete Pod event handler")
-
-	pod := podObj.(*v1.Pod)
-	klog.Infof("[Fluence] Delete pod has status %s", pod.Status.Phase)
-	switch pod.Status.Phase {
-	case v1.PodSucceeded:
-	case v1.PodPending:
-		klog.Infof("[Fluence] Pod %s completed and is Pending termination, Fluence needs to free the resources", pod.Name)
-
-		f.mutex.Lock()
-		defer f.mutex.Unlock()
-
-		if _, ok := f.podNameToJobId[pod.Name]; ok {
-			f.cancelFluxJobForPod(pod)
-		} else {
-			klog.Infof("[Fluence] Terminating pod %s/%s doesn't have flux jobid", pod.Namespace, pod.Name)
-		}
-	case v1.PodRunning:
-		f.mutex.Lock()
-		defer f.mutex.Unlock()
-
-		if _, ok := f.podNameToJobId[pod.Name]; ok {
-			f.cancelFluxJobForPod(pod)
-		} else {
-			klog.Infof("[Fluence] Deleted pod %s/%s doesn't have flux jobid", pod.Namespace, pod.Name)
-		}
-	}
-
-	// We assume that a request to delete one pod means all of them.
-	// We have to take an all or nothing approach for now
-	fgroup.DeleteFluenceGroup(pod)
 }

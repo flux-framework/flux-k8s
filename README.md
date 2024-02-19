@@ -9,11 +9,11 @@ Fluence enables HPC-grade pod scheduling in Kubernetes via the [Kubernetes Sched
 ## Getting started
 
 For instructions on how to start Fluence on a K8s cluster, see [examples](examples/). Documentation and instructions for reproducing our CANOPIE-2022 paper (citation below) can be found in the [canopie22-artifacts branch](https://github.com/flux-framework/flux-k8s/tree/canopie22-artifacts).
-For background on the Flux framework and the Fluxion scheduler, you can take a look at our award-winning R&D100 submission: https://ipo.llnl.gov/sites/default/files/2022-02/Flux_RD100_Final.pdf. For next steps:
+For background on the Flux framework and the Fluxion scheduler, you can take a look at our award-winning [R&D100 submission](https://ipo.llnl.gov/sites/default/files/2022-02/Flux_RD100_Final.pdf). For next steps:
 
  - To understand how it works, see [Design](#design)
  - To deploy our pre-built images, go to [Deploy](#deploy)
- - To build your own images, go to [Setup](#setup)
+ - To build your own images, go to [Build](#build)
  - To learn about repository organization, see [Developer](#developer)
 
 ### Design
@@ -21,28 +21,31 @@ For background on the Flux framework and the Fluxion scheduler, you can take a l
 Fluence is a custom scheduler plugin that you can specify to use with two directive in your pod spec -
 
 - Asking for `fluence` as the scheduler name
-- On either a job or a single or group of pods:
-  - Defining a named group of pods with the `fluence.flux-framework.org/pod-group` label. 
-  - Defining the group size with the `fluence.flux-framework.org/group-size` label. 
+
+Note that any abstraction with pods (or a single pod) marked for fluence will automatically have the group name
+and nodes derived. However, if you want to customize this metadata (for example, define the size of the pod group explicitly you can use
+the following labels):
+
+  - A named group of pods with the `scheduling.x-k8s.io/pod-group` label. 
+  - Defining the group size with the `fluence.group-size` label. 
+
+We expect to define more labels to customize the scheduling logic.
 
 The way it works:
 
-1. We have a mutating admission webhook that looks for jobs and pods, and ensures there are fluence labels.
-2. A PodGroup reconciler is watching for these same objects. When they are created (this is not done yet):
+1. We have a mutating admission webhook that looks for jobs and pods, and ensures there are fluence labels (likely we will add more abstractions).
+2. A PodGroup reconciler is watching for these same objects. When they are created:
   a. We find the labels and create the pod group object.
-  b. The pod group object has a timestamp for creation.
+  b. The pod group object has a timestamp for creation in milliseconds.
 3. When the pod is then given to fluence for scheduling, it already has the PodGroup created with name/size and can properly sort.
 
-Another strategy I'm considering (if the above runs into trouble) is to watch a [channel](https://book-v1.book.kubebuilder.io/beyond_basics/controller_watches). An example is shown below for an indexed job, which will create multiple pods.
+Here is an example of a Job intended for Fluence:
 
 ```yaml
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: fluence-job
-  labels:
-    fluence.flux-framework.org/pod-group: my-pods
-    fluence.flux-framework.org/group-size: 10
 spec:
   completions: 10
   parallelism: 10
@@ -58,8 +61,32 @@ spec:
   backoffLimit: 4
 ```
 
-The group size might be different than, for example, your higher level abstraction (e.g., the IndexedJob) as there is no reason
-pods with different names cannot be part of the same group that needs to be scheduled together.
+And you can imagine if you want to group pods from different abstractions together, or declare a different size than what is represented in the Job:
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fluence-job
+  labels:
+    scheduling.x-k8s.io/pod-group: min-size-group
+    fluence.group-size: 5
+spec:
+  completions: 10
+  parallelism: 10
+  completionMode: Indexed
+  template:
+    spec:
+      schedulerName: fluence
+      containers:
+      - name: fluence-job
+        image: busybox
+        command: [echo, potato]
+      restartPolicy: Never
+  backoffLimit: 4
+```
+
+There is no reason pods with different names or under different abstractions cannot be part of the same group that needs to be scheduled together.
 
 ### Deploy
 
@@ -88,7 +115,7 @@ helm install \
 And that's it! See the [testing install](#testing-install) section for a basic example
 to schedule pods using Fluence.
 
-### Setup
+### Build
 
 To build and test Fluence, you will need:
 
@@ -96,9 +123,7 @@ To build and test Fluence, you will need:
  - [helm](https://helm.sh/docs/intro/install/) to install charts for scheduler plugins.
  - A Kubernetes cluster for testing, e.g., you can deploy one with [kind](https://kind.sigs.k8s.io/docs/user/quick-start/)
 
-### Building Fluence
-
-There are two images we will be building:
+There are three images we will be building:
 
  - the scheduler sidecar: built from the repository here
  - the scheduler: built (and modified) from [this branch of scheduler-plugins](https://github.com/openshift-psap/scheduler-plugins/blob/fluence/build/scheduler/Dockerfile)
@@ -111,7 +136,7 @@ There are two images we will be building:
 This will run the full builds for all containers in one step, which includes:
 
 1. Building the fluence sidecar from source code in [src](src)
-2. Cloning the upstream kubernetes-sigs/plugin-schedulers respository to ./upstream
+2. Cloning the upstream kubernetes-sigs/plugin-schedulers repository to ./upstream
 3. Building the scheduler and controller containers
 
 From the root here:
@@ -128,26 +153,18 @@ make REGISTRY=vanessa SCHEDULER_IMAGE=fluence SIDECAR_IMAGE=fluence-sidecar CONT
 
 As an alternative, you can look at the Makefile to do each of the steps separately.
 
-
-Whatever build approach you use, you'll want to push to your registry for later discovery!
-
-```bash
-docker push docker.io/vanessa/fluence
-docker push docker.io/vanessa/fluence-sidecar
-docker push docker.io/vanessa/fluence-controller
-```
-
-### Prepare Cluster
+#### Prepare Cluster
 
 > Prepare a cluster and install the Kubernetes scheduling plugins framework
 
-These steps will require a Kubernetes cluster to install to, and having pushed the plugin container to a registry. If you aren't using a cloud provider, you can create a local one with `kind`:
+These steps will require a Kubernetes cluster to install to, and having pushed the plugin container to a registry OR loading
+them into the local cluster and setting the image pull policy to `Never`. If you aren't using a cloud provider, you can create a local one with `kind`:
 
 ```bash
 kind create cluster --config ./examples/kind-config.yaml
 ```
 
-And install the certificate manager:
+And again install the certificate manager:
 
 ```bash
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.1/cert-manager.yaml
@@ -155,7 +172,7 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/
 
 **Important** if you are developing or testing fluence, note that custom scheduler plugins don't seem to work out of the box with MiniKube (but everything works with kind). Likely there are extensions or similar that need to be configured with MiniKube (that we have not looked into).
 
-### Install Fluence
+#### Install Fluence
 
 For some background, the [Scheduling Framework](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/) provided by
 Kubernetes means that our container is going to provide specific endpoints to allow for custom scheduling. At this point you can follow the instructions
@@ -184,19 +201,26 @@ helm show values as-a-second-scheduler/
 
 scheduler:
   name: fluence
-  image: registry.k8s.io/scheduler-plugins/kube-scheduler:v0.27.8
+  image: ghcr.io/flux-framework/fluence:latest
   replicaCount: 1
   leaderElect: false
   sidecarimage: ghcr.io/flux-framework/fluence-sidecar:latest
   policy: lonode
   pullPolicy: Always
   sidecarPullPolicy: Always
+  loggingLevel: "9"
+
+  # Port is for GRPC, and enabling the external service will also
+  # create the service and ingress to it, along with adding
+  # additional API endpoints for our TBA kubectl plugin
+  enableExternalService: false
+  port: 4242
 
 controller:
   name: scheduler-plugins-controller
   image: ghcr.io/flux-framework/fluence-controller:latest
   replicaCount: 1
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
 # LoadVariationRiskBalancing and TargetLoadPacking are not enabled by default
 # as they need extra RBAC privileges on metrics.k8s.io.
@@ -217,6 +241,15 @@ pluginConfig:
 #   args:
 #     scoringStrategy:
 #       type: MostAllocated # default is LeastAllocated
+
+enableCertManager: true
+kubernetesClusterDomain: cluster.local
+webhookService:
+  ports:
+  - port: 9443
+    protocol: TCP
+    targetPort: 9443
+  type: ClusterIP
 ```
 
 </details>
@@ -239,9 +272,15 @@ If you need to uninstall (e.g., to redo something):
 helm uninstall fluence
 ```
 
+Or see the name you used:
+
+```bash
+helm list
+```
+
 Next you can move down to testing the install.
 
-### Testing Install
+#### Testing Install
 
 The installation process will run one scheduler and one controller pod for the Scheduler Plugin Framework in the default namespace.
 You can double check that everything is running as follows:
@@ -284,35 +323,40 @@ kubectl logs fluence-6bbcbc6bbf-xjfx6 -c scheduler-plugins-scheduler
 
 If you haven't done anything, you'll likely just see health checks.
 
-### Deploy Pods
+#### Testing Pods and Jobs
 
-Let's now run a simple example! Change directory into this directory:
+You can test deploying pods and jobs.
 
 ```bash
-# This is from the root of flux-k8s
-cd examples/simple_example
+kubectl apply -f examples/simple_example/fluence-scheduler-pod.yaml 
+```
+or a job:
+
+```bash
+# size 3
+kubectl  apply -f examples/test_example/fluence-sized-job.yaml
+
+# size 1
+kubectl  apply -f examples/test_example/fluence-job.yaml 
 ```
 
-And then we want to deploy two pods, one assigned to the `default-scheduler` and the other
-`fluence`. For FYI, we do this via setting `schedulerName` in the spec:
+Note that all of these have (in their spec) a designation of the fluence scheduler.
 
 ```yaml
 spec:
   schedulerName: fluence
 ```
 
-Here is how to create the pods:
-
-```bash
-kubectl apply -f default-scheduler-pod.yaml
-kubectl apply -f fluence-scheduler-pod.yaml
-```
-
-Once it was created, aside from checking that it ran OK, I could verify by looking at the scheduler logs again:
+Once it was created, aside from checking that it ran OK, you can verify by looking at the scheduler logs again:
 
 ```bash
 kubectl logs fluence-6bbcbc6bbf-xjfx6
 ```
+
+<details>
+
+<summary>Scheduler Logs</summary>
+
 ```bash
 Defaulted container "sidecar" out of: sidecar, scheduler-plugins-scheduler
 This is the fluxion grpc server
@@ -361,6 +405,8 @@ FINAL NODE RESULT:
 [GRPCServer] Response podID:"fluence-scheduled-pod" nodelist:{nodeID:"kind-control-plane" tasks:1} jobID:1 
 ```
 
+</details>
+
 I was trying to look for a way to see the assignment, and maybe we can see it here (this is the best I could come up with!)
 
 ```bash
@@ -385,7 +431,6 @@ pod/fluence-scheduled-pod  spec.containers{fluence-scheduled-container}  kubelet
 
 For the above, I found [this page](https://kubernetes.io/docs/tasks/extend-kubernetes/configure-multiple-schedulers/#enable-leader-election) very helpful.
 
-Finally, note that we also have a more appropriate example with jobs under [examples/test_example](examples/test_example). It's slightly more sane because it uses Job, and jobs are expected to complete (whereas pods are not and will get into crash loop backoffs, etc). For example of how to programmatically interact with the job pods and check states, events, see the [test.sh](.github/test.sh) script.
 
 ### Developer
 
@@ -397,9 +442,10 @@ If you are looking to develop:
 
  - [src](src): includes source code for fluence. You'll find logs for this code in the `sidecar` container of the fluence pod.
  - [sig-scheduler-plugins](sig-scheduler-plugins): includes assets (manifests and Go files) that are intended to be added to the kubernetes-sigs/scheduler-plugins upstream repository before build. You'll find logs for this container in the `scheduler-plugins-scheduler` container of the pod.
+   - [apis](sig-scheduler-plugins/apis): customized PodGroup to define the status scheduled time in micro seconds
    - [manifests](sig-scheduler-plugins/manifests): manifests for helm and Kubernetes
    - [pkg](sig-scheduler-plugins/pkg): the main fluence module to add to upstream
-   - [cmd](sig-scheduler-plugins/cmd): the main.go to replace in upstream
+   - [cmd](sig-scheduler-plugins/cmd): the main.go to replace in upstream   
  - *upstream*: the default name this upstream is cloned to when you do a make build command.
 
 Note that the clone of the repository and copying of files to the correct locations is all automated through the [Makefile](Makefile). Additional commands provided include the following:
@@ -447,7 +493,7 @@ I was having trouble developing this easily because it's a lot of steps to build
 The last step ensures we use the images we loaded! You can basically just do:
 
 ```bash
-./hack/quick-build.sh
+/bin/bash ./hack/quick-build.sh
 ```
 
 This sped up my development time immensely. If you want to manually do the steps, see that script for instructions.
@@ -474,60 +520,18 @@ kind create cluster --config ./kind-config.yaml
 #### TODO
 
  - Try what [kueue does](https://github.com/kubernetes-sigs/kueue/blob/6d57813a52066dab412735deeeb60ebb0cdb8e8e/cmd/kueue/main.go#L146-L155) to not require cert-manager.
-
-#### Vanessa Thinking
-
-> Updated February 15, 2024
-
-What I think might be happening (and not always, sometimes)
-
-- New pod group, no node list
-- Fluence assigns nodes
-- Nodes get assigned to pods 1:1
-- POD group is deleted
-- Some pod is sent back to queue (kubelet rejects, etc)
-- POD group does not exist and is recreated, no node list
-- Fluence asks again, but still has the first job. Not enough resources, asks forever.
-
-The above would not happen with the persistent pod group (if it wasn't cleaned up until the deletion of the job) and wouldn't happen if there are just enough resources to account for the overlap.
-
-- Does Fluence allocate resources for itself?
-- It would be nice to be able to inspect the state of Fluence.
-- At some point we want to be using the TBA fluxion-go instead of the one off branch we currently have (but we don't need to be blocked for that)
-- We should (I think) restore pod group (it's in the controller here) and have our own container built. That way we have total control over the custom resource, and we don't risk it going away.
-  - As a part of that, we can add add a mutating webhook that emulates what we are doing in fluence now to find the label, but instead we will create the CRD to hold state instead of trying to hold in the operator.
-- It could then also be investigated that we can more flexibly change the size of the group, within some min/max size (also determined by labels?) to help with scheduling.
-- Note that kueue has added a Pod Group object, so probably addresses the static case here.
+ - Add other abstraction types to be intercepted (and labeled with sizes)
 
 #### Components
 
  - [FluxStateData](sig-scheduler-plugins/pkg/fluence/core/core.go): is given to the [framework.CycleState](https://github.com/kubernetes/kubernetes/blob/242b41b36a20032f99e8a059ca0a5d764105217b/pkg/scheduler/framework/cycle_state.go#L48) and serves as a vehicle to store a cache of node name assignment.
 
 
-#### Helm
-
-The install commands are shown above, but often you want to uninstall!
-
-> What is the name of the installed plugin again?
-
-```bash
- helm list
-NAME                    NAMESPACE       REVISION        UPDATED                                 STATUS          CHART                   APP VERSION
-fluence  default         1               2024-01-08 12:04:58.558612156 -0700 MST deployed        scheduler-plugins-0.27.80.27.8     
-```
-
-And then uninstall:
-
-```bash
-$ helm uninstall fluence
-release "fluence" uninstalled
-```
-
-
 ## Papers
 
 You can find details of Fluence architecture, implementation, experiments, and improvements to the Kubeflow MPI operator in our collaboration's papers:
-```
+
+```bibtex
 @INPROCEEDINGS{10029991,
   author={Milroy, Daniel J. and Misale, Claudia and Georgakoudis, Giorgis and Elengikal, Tonia and Sarkar, Abhik and Drocco, Maurizio and Patki, Tapasya and Yeom, Jae-Seung and Gutierrez, Carlos Eduardo Arango and Ahn, Dong H. and Park, Yoonho},
   booktitle={2022 IEEE/ACM 4th International Workshop on Containers and New Orchestration Paradigms for Isolated Environments in HPC (CANOPIE-HPC)}, 
@@ -539,7 +543,7 @@ You can find details of Fluence architecture, implementation, experiments, and i
   doi={10.1109/CANOPIE-HPC56864.2022.00011}
 }
 ```
-```
+```bibtex
 @INPROCEEDINGS{9652595,
   author={Misale, Claudia and Drocco, Maurizio and Milroy, Daniel J. and Gutierrez, Carlos Eduardo Arango and Herbein, Stephen and Ahn, Dong H. and Park, Yoonho},
   booktitle={2021 3rd International Workshop on Containers and New Orchestration Paradigms for Isolated Environments in HPC (CANOPIE-HPC)}, 
@@ -551,7 +555,7 @@ You can find details of Fluence architecture, implementation, experiments, and i
   doi={10.1109/CANOPIEHPC54579.2021.00006}
 }
 ```
-```
+```bibtex
 @inproceedings{10.1007/978-3-030-96498-6_18,
 	address = {Cham},
 	author = {Misale, Claudia and Milroy, Daniel J. and Gutierrez, Carlos Eduardo Arango and Drocco, Maurizio and Herbein, Stephen and Ahn, Dong H. and Kaiser, Zvonko and Park, Yoonho},

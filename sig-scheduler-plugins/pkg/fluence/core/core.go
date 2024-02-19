@@ -3,10 +3,7 @@ package core
 import (
 	"fmt"
 
-	v1 "k8s.io/api/core/v1"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/klog/v2"
+	klog "k8s.io/klog/v2"
 
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 	pb "sigs.k8s.io/scheduler-plugins/pkg/fluence/fluxcli-grpc"
@@ -26,13 +23,9 @@ func (s *FluxStateData) Clone() framework.StateData {
 	return &FluxStateData{NodeCache: s.NodeCache}
 }
 
-// NewFluxState creates an entry for the CycleState with the minimum that we might need
-func NewFluxState(nodeName string, groupName string, size int32) *FluxStateData {
-	cache := NodeCache{
-		NodeName:     nodeName,
-		GroupName:    groupName,
-		MinGroupSize: size,
-	}
+// NewFluxState creates an entry for the CycleState with the node and group name
+func NewFluxState(nodeName string, groupName string) *FluxStateData {
+	cache := NodeCache{NodeName: nodeName}
 	return &FluxStateData{NodeCache: cache}
 }
 
@@ -42,162 +35,127 @@ func NewFluxState(nodeName string, groupName string, size int32) *FluxStateData 
 type NodeCache struct {
 	NodeName string
 
-	// This is derived from tasks, where
-	// task is an allocation to some node
-	// High level it is most often akin to the
-	// number of pods on the node. I'm not sure that I understand this
-	// https://github.com/flux-framework/flux-k8s/blob/9f24f36752e3cced1b1112d93bfa366fb58b3c84/src/fluence/fluxion/fluxion.go#L94-L97
-	// How does that relate to a single pod? It is called "Count" in other places
-	Tasks int
+	// Tie assignment back to PodGroup, which can be used to get size and time created
+	GroupName string
 
-	// These fields are primarily for the FluxStateData
-	// Without a PodGroup CRD we keep min size here
-	MinGroupSize int32
-	GroupName    string
+	// Assigned tasks (often pods) to nodes
+	// https://github.com/flux-framework/flux-k8s/blob/9f24f36752e3cced1b1112d93bfa366fb58b3c84/src/fluence/fluxion/fluxion.go#L94-L97
+	AssignedTasks int
 }
 
 // A pod group cache holds a list of nodes for an allocation, where each has some number of tasks
 // along with the expected group size. This is intended to replace PodGroup
 // given the group name, size (derived from annotations) and timestamp
 type PodGroupCache struct {
+	GroupName string
 
 	// This is a cache of nodes for pods
 	Nodes []NodeCache
-	Size  int32
-	Name  string
-
-	// Keep track of when the group was initially created!
-	// This is like, the main thing we need.
-	TimeCreated metav1.MicroTime
 }
 
-// Memory cache of pod group name to pod group cache, above
-var podGroupCache map[string]*PodGroupCache
+// PodGroups seen by fluence
+var groupsSeen map[string]*PodGroupCache
 
-// Init populates the podGroupCache
+// Init populates the groupsSeen cache
 func Init() {
-	podGroupCache = map[string]*PodGroupCache{}
+	groupsSeen = map[string]*PodGroupCache{}
 }
 
-// RegisterPodGroup ensures that the PodGroup exists in the cache
-// This is an experimental replacement for an actual PodGroup
-// We take a timestampo, which if called from Less (during sorting) is tiem.Time
-// if called later (an individual pod) we go for its creation timestamp
-func RegisterPodGroup(pod *v1.Pod, groupName string, groupSize int32) error {
-	entry, ok := podGroupCache[groupName]
-
-	if !ok {
-
-		// Assume we create the group with the timestamp
-		// of the first pod seen. There might be imperfections
-		// by the second, but as long as we sort them via millisecond
-		// this should prevent interleaving
-		nodes := []NodeCache{}
-
-		// Create the new entry for the pod group
-		entry = &PodGroupCache{
-			Name:        groupName,
-			Size:        groupSize,
-			Nodes:       nodes,
-			TimeCreated: metav1.NowMicro(),
-		}
-
-		// Tell the user when it was created
-		klog.Infof("[Fluence] Pod group %s was created at %s\n", entry.Name, entry.TimeCreated)
-	}
-
-	// If the size has changed, we currently do not allow updating it.
-	// We issue a warning. In the future this could be supported with a grow command.
-	if entry.Size != groupSize {
-		klog.Infof("[Fluence] Pod group %s request to change size from %s to %s is not yet supported\n", groupName, entry.Size, groupSize)
-		// entry.GroupSize = groupSize
-	}
-	podGroupCache[groupName] = entry
-	return nil
-}
-
-// GetPodGroup gets a pod group in the cache by name
-func GetPodGroup(groupName string) *PodGroupCache {
-	entry, _ := podGroupCache[groupName]
+// GetFluenceCache determines if a group has been seen.
+// Yes -> we return the PodGroupCache entry
+// No -> the entry is nil / does not exist
+func GetFluenceCache(groupName string) *PodGroupCache {
+	entry, _ := groupsSeen[groupName]
 	return entry
 }
 
 // DeletePodGroup deletes a pod from the group cache
 func DeletePodGroup(groupName string) {
-	delete(podGroupCache, groupName)
-}
-
-// ListGroups lists groups, primarily for debugging
-func ListGroups() {
-	for name, pg := range podGroupCache {
-		fmt.Printf("                    %s: size %s, created at %s\n", name, pg.Size, &pg.TimeCreated)
-	}
+	delete(groupsSeen, groupName)
 }
 
 // CreateNodePodsList creates a list of node pod caches
-func CreateNodePodsList(nodelist []*pb.NodeAlloc, groupName string) (nodepods []NodeCache) {
+func CreateNodeList(nodelist []*pb.NodeAlloc, groupName string) (nodepods []NodeCache) {
 
 	// Create a pod cache for each node
 	nodepods = make([]NodeCache, len(nodelist))
 
+	// TODO: should we be integrating topology information here? Could it be the
+	// case that some nodes (pods) in the group should be closer?
 	for i, v := range nodelist {
 		nodepods[i] = NodeCache{
-			NodeName: v.GetNodeID(),
-			Tasks:    int(v.GetTasks()),
+			NodeName:      v.GetNodeID(),
+			AssignedTasks: int(v.GetTasks()),
+			GroupName:     groupName,
 		}
 	}
 
-	// Update the pods in the PodGraphCache
-	updatePodGroupNodes(groupName, nodepods)
-	klog.Infof("[Fluence] Pod group cache updated with nodes\n", podGroupCache)
+	// Update the pods in the PodGroupCache (groupsSeen)
+	updatePodGroupCache(groupName, nodepods)
 	return nodepods
 }
 
 // updatePodGroupList updates the PodGroupCache with a listing of nodes
-func updatePodGroupNodes(groupName string, nodes []NodeCache) {
-	group := podGroupCache[groupName]
-	group.Nodes = nodes
-	podGroupCache[groupName] = group
+func updatePodGroupCache(groupName string, nodes []NodeCache) {
+	cache := PodGroupCache{
+		Nodes:     nodes,
+		GroupName: groupName,
+	}
+	groupsSeen[groupName] = &cache
 }
 
-// HavePodNodes returns true if the listing of pods is not empty
-// This should be all pods that are needed - the allocation will not
-// be successful otherwise, so we just check > 0
-func (p *PodGroupCache) HavePodNodes() bool {
-	return len(p.Nodes) > 0
-}
+// GetNextNode gets the next node in the PodGroupCache
+func (p *PodGroupCache) GetNextNode() (string, error) {
 
-// CancelAllocation resets the node cache and allocation status
-func (p *PodGroupCache) CancelAllocation() {
-	p.Nodes = []NodeCache{}
+	nextnode := ""
+
+	// Quick failure state - we ran out of nodes
+	if len(p.Nodes) == 0 {
+		return nextnode, fmt.Errorf("[Fluence] PodGroup %s ran out of nodes.", p.GroupName)
+	}
+
+	// The next is the 0th in the list
+	nextnode = p.Nodes[0].NodeName
+	klog.Infof("[Fluence] Next node for group %s is %s", p.GroupName, nextnode)
+
+	// If there is only one task left, we are going to use it (and remove the node)
+	if p.Nodes[0].AssignedTasks == 1 {
+		klog.Infof("[Fluence] First node has one remaining task slot")
+		slice := p.Nodes[1:]
+
+		// If after we remove the node there are no nodes left...
+		// Note that I'm not deleting the node from the cache because that is the
+		// only way fluence knows it has already assigned work (presence of the key)
+		if len(slice) == 0 {
+			klog.Infof("[Fluence] Assigning node %s. There are NO reamining nodes for group %s\n", nextnode, p.GroupName)
+			// delete(podGroupCache, groupName)
+			return nextnode, nil
+		}
+
+		klog.Infof("[Fluence] Assigning node %s. There are nodes left for group", nextnode, p.GroupName)
+		updatePodGroupCache(p.GroupName, slice)
+		return nextnode, nil
+	}
+
+	// If we get here the first node had >1 assigned tasks
+	klog.Infof("[Fluence] Assigning node %s for group %s. There are still task assignments available for this node.", nextnode, p.GroupName)
+	p.Nodes[0].AssignedTasks = p.Nodes[0].AssignedTasks - 1
+	return nextnode, nil
 }
 
 // GetNextNode gets the next available node we can allocate for a group
+// TODO this should be able to take and pass forward a number of tasks.
+// It is implicity 1 now, but doesn't have to be.
 func GetNextNode(groupName string) (string, error) {
-	entry, ok := podGroupCache[groupName]
+
+	// Get our entry from the groupsSeen cache
+	klog.Infof("[Fluence] groups seen %s", groupsSeen)
+	entry, ok := groupsSeen[groupName]
+
+	// This case should not happen
 	if !ok {
-		return "", fmt.Errorf("[Fluence] Map is empty\n")
+		return "", fmt.Errorf("[Fluence] Map is empty")
 	}
-	if len(entry.Nodes) == 0 {
-		return "", fmt.Errorf("[Fluence] Error while getting a node\n")
-	}
-
-	nodename := entry.Nodes[0].NodeName
-	klog.Infof("[Fluence] Next node for group %s is %s", groupName, nodename)
-
-	if entry.Nodes[0].Tasks == 1 {
-		klog.Infof("[Fluence] First node has one task")
-		slice := entry.Nodes[1:]
-		if len(slice) == 0 {
-			klog.Infof("[Fluence] After this node, the slice is empty, deleting group %s from cache\n", groupName)
-			delete(podGroupCache, groupName)
-			return nodename, nil
-		}
-		klog.Infof("[Fluence] After this node, the slide still has nodes")
-		updatePodGroupNodes(groupName, slice)
-		return nodename, nil
-	}
-	klog.Infof("[Fluence] Subtracting one task from first node")
-	entry.Nodes[0].Tasks = entry.Nodes[0].Tasks - 1
-	return nodename, nil
+	// Get the next node from the PodGroupCache
+	return entry.GetNextNode()
 }

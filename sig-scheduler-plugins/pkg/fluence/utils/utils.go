@@ -21,7 +21,7 @@ import (
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/klog/v2"
+	klog "k8s.io/klog/v2"
 	pb "sigs.k8s.io/scheduler-plugins/pkg/fluence/fluxcli-grpc"
 )
 
@@ -39,12 +39,14 @@ func getPodJobspecLabels(pod *v1.Pod) []string {
 	return labels
 }
 
-// InspectPodInfo takes a pod object and returns the pod.spec
-// Note from vsoch - I updated this to calculate containers across the pod
-// if that's wrong we can change it back.
-func InspectPodInfo(pod *v1.Pod) *pb.PodSpec {
+// PreparePodJobSpec takes a pod object and returns the jobspec
+// The jobspec is based on the pod, and assumes it will be duplicated
+// for a MatchAllocate request (representing all pods). We name the
+// jobspec based on the group and not the individual ID.
+// This calculates across containers in the od
+func PreparePodJobSpec(pod *v1.Pod, groupName string) *pb.PodSpec {
 	ps := new(pb.PodSpec)
-	ps.Id = pod.Name
+	ps.Id = groupName
 
 	// Note from vsoch - there was an if check here to see if we had labels,
 	// I don't think there is risk to adding an empty list but we can add
