@@ -22,6 +22,9 @@ import (
 // We assume that the cancelled job also means deleting the pod group
 func (f *Fluence) cancelFluxJob(groupName string) error {
 
+	// TODO: it's a bit risky to store state here, because if the scheduler
+	// restarts we cannot look up the jobid, and then cannot cancel it.
+	// There is no way to request cancelling the job for a specific group
 	jobid, ok := f.groupToJobId[groupName]
 
 	// The job was already cancelled by another pod
