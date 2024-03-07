@@ -6,6 +6,12 @@ Fluence enables HPC-grade pod scheduling in Kubernetes via the [Kubernetes Sched
 
 **Important** Fluence does not currently support use in conjunction with the kube-scheduler. Pods must all be scheduled by Fluence, and *you should not use both schedulers in the same cluster*.
 
+## TODO
+
+- Need to list pods, get state, and if is completed, cancel the job id.
+- Keep track of state of all pods in group, when all of pods are completed, then issue cancel.
+- Calculate on the fly - on the update event we want to loop through pods, if ALL completed, then delete the podid for fluence.
+
 ## Getting started
 
 For instructions on how to start Fluence on a K8s cluster, see [examples](examples/). Documentation and instructions for reproducing our CANOPIE-2022 paper (citation below) can be found in the [canopie22-artifacts branch](https://github.com/flux-framework/flux-k8s/tree/canopie22-artifacts).
