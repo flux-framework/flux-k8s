@@ -11,6 +11,6 @@ spec:
       containers:
       - name: fluence-job
         image: busybox
-        command: [echo, potato]
+        command: [sleep, "20"]
       restartPolicy: Never
   backoffLimit: 4

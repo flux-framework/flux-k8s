@@ -26,6 +26,7 @@ import (
 
 	"sigs.k8s.io/scheduler-plugins/pkg/capacityscheduling"
 	"sigs.k8s.io/scheduler-plugins/pkg/coscheduling"
+	"sigs.k8s.io/scheduler-plugins/pkg/fluence"
 	"sigs.k8s.io/scheduler-plugins/pkg/networkaware/networkoverhead"
 	"sigs.k8s.io/scheduler-plugins/pkg/networkaware/topologicalsort"
 	"sigs.k8s.io/scheduler-plugins/pkg/noderesources"
@@ -36,7 +37,7 @@ import (
 	"sigs.k8s.io/scheduler-plugins/pkg/trimaran/loadvariationriskbalancing"
 	"sigs.k8s.io/scheduler-plugins/pkg/trimaran/lowriskovercommitment"
 	"sigs.k8s.io/scheduler-plugins/pkg/trimaran/targetloadpacking"
-	"sigs.k8s.io/scheduler-plugins/pkg/fluence"
+
 	// Ensure scheme package is initialized.
 	_ "sigs.k8s.io/scheduler-plugins/apis/config/scheme"
 )
@@ -56,8 +57,6 @@ func main() {
 		app.WithPlugin(preemptiontoleration.Name, preemptiontoleration.New),
 		app.WithPlugin(targetloadpacking.Name, targetloadpacking.New),
 		app.WithPlugin(lowriskovercommitment.Name, lowriskovercommitment.New),
-		// Sample plugins below.
-		// app.WithPlugin(crossnodepreemption.Name, crossnodepreemption.New),
 		app.WithPlugin(podstate.Name, podstate.New),
 		app.WithPlugin(qos.Name, qos.New),
 		app.WithPlugin(fluence.Name, fluence.New),

@@ -17,6 +17,6 @@ spec:
       command: lmp -v x 1 -v y 1 -v z 1 -in in.reaxc.hns -nocite
       resources:
         limits:
-          cpu: 2
+          cpu: 10
         requests:
-          cpu: 2
+          cpu: 10
