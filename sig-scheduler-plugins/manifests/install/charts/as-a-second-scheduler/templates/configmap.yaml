@@ -1,0 +1,64 @@
+{{- if .Values.plugins.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: scheduler-config
+  namespace: {{ .Release.Namespace }}
+data:
+  scheduler-config.yaml: |
+    apiVersion: kubescheduler.config.k8s.io/v1
+    kind: KubeSchedulerConfiguration
+    leaderElection:
+      leaderElect: {{ .Values.scheduler.leaderElect }}
+    profiles:
+    # Compose all plugins in one profile
+    - schedulerName: {{ .Values.scheduler.name }}
+      plugins:
+        preBind:
+          disabled:
+           - name: {{ .Values.scheduler.name }}
+        filter:
+          disabled:
+          {{- range $.Values.plugins.disabledAll }}
+          - name: {{ title . }}
+          {{- end }}
+        reserve:
+          disabled:
+          {{- range $.Values.plugins.disabledAll }}
+          - name: {{ title . }}
+          {{- end }}
+        score:
+          disabled:
+          {{- range $.Values.plugins.disabledAll }}
+          - name: {{ title . }}
+          {{- end }}
+        preScore:
+          disabled:
+          {{- range $.Values.plugins.disabledAll }}
+          - name: {{ title . }}
+          {{- end }}
+        postFilter:
+          disabled:
+          {{- range $.Values.plugins.disabledAll }}
+          - name: {{ title . }}
+          {{- end }}
+        preFilter:
+          disabled:
+          {{- range $.Values.plugins.disabledAll }}
+          - name: {{ title . }}
+          {{- end }}
+        multiPoint:
+          enabled:
+          {{- range $.Values.plugins.enabled }}
+          - name: {{ title . }}
+          {{- end }}
+          disabled:
+          {{- range $.Values.plugins.disabled }}
+          - name: {{ title . }}
+          {{- end }}
+      {{- if $.Values.pluginConfig }}
+      pluginConfig: {{ toYaml $.Values.pluginConfig | nindent 6 }}
+      {{- end }}
+
+  {{- /* TODO: wire CRD installation with enabled plugins. */}}
+{{- end }}
