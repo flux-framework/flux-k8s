@@ -31,14 +31,23 @@ controller:
 plugins:
   enabled: ["Fluence"]
   disabled: ["CapacityScheduling","NodeResourceTopologyMatch","NodeResourcesAllocatable","PrioritySort","Coscheduling"] # only in-tree plugins need to be defined here
+  # Disable EVERYTHING except for fluence
+  # VolumeBinding is required for PreBind, NodeResourcesFit is required or you'll get mismatches
+  # Yes - some of these are irrelevant for the use case here, but I'd rather be super
+  # conservative and be absolutely sure only fluence is running PreFilter to select nodes
+  disabledAll: ["NodePorts", "VolumeRestrictions", "EBSLimits",
+                "GCEPDLimits", "NodeVolumeLimits", "AzureDiskLimits", "VolumeZone", 
+                "PodTopologySpread", "InterPodAffinity", "NodeAffinity",
+                "NodeUnschedulable", "NodeName", "TaintToleration", "DefaultPreemtion",
+                "NodeResourcesBalancedAllocation", "ImageLocality"]
 
 # Customize the enabled plugins' config.
 # Refer to the "pluginConfig" section of manifests/<plugin>/scheduler-config.yaml.
 # For example, for Coscheduling plugin, you want to customize the permit waiting timeout to 10 seconds:
-pluginConfig:
-- name: Coscheduling
-  args:
-    permitWaitingTimeSeconds: 10 # default is 60
+# pluginConfig:
+# - name: Coscheduling
+#  args:
+#    permitWaitingTimeSeconds: 10 # default is 60
 # Or, customize the other plugins
 # - name: NodeResourceTopologyMatch
 #   args:

@@ -8,9 +8,11 @@ Fluence enables HPC-grade pod scheduling in Kubernetes via the [Kubernetes Sched
 
 ## TODO
 
-- Need to list pods, get state, and if is completed, cancel the job id.
-- Keep track of state of all pods in group, when all of pods are completed, then issue cancel.
-- Calculate on the fly - on the update event we want to loop through pods, if ALL completed, then delete the podid for fluence.
+- On init, need to load in resource graph that accounts for running stuff
+- Need to allow for restart / crashes and looking up existing jobid, updating maps in PodGroup
+- Since AskFlux is done on level of pod group, refactor function to account for specific resources of all pods (not just one pod)
+- Figure out if EventsToRegister replaces old informer
+- Would be nice to see the state of fluxion (retest the kubectl-fluence plugin)
 
 ## Getting started
 
@@ -525,13 +527,6 @@ For this setup if you are developing locally with kind, you will need to enable 
 ```bash
 kind create cluster --config ./kind-config.yaml
 ```
-
-#### TODO
-
- - Try what [kueue does](https://github.com/kubernetes-sigs/kueue/blob/6d57813a52066dab412735deeeb60ebb0cdb8e8e/cmd/kueue/main.go#L146-L155) to not require cert-manager.
- - Try other strategies for setting owner references (so cleans up when owner deleted)
-   - When that is done, add tests for deletion of pod group (the current method is not perfect and needs improvement)
-- We really need to see the state of fluxion - I had this running for about 6 hours in kind, and at some point it just stopped working. I deleted and re-created the cluster and it was restored. It could be a development hiccup but would be good to know!
 
 #### Components
 

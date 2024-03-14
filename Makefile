@@ -26,12 +26,14 @@ update: clone
 prepare: clone
 	# These are entirely new directory structures
 	rm -rf $(CLONE_UPSTREAM)/pkg/fluence
+	# rm -rf $(CLONE_UPSTREAM)/cmd/app
 	rm -rf $(CLONE_UPSTREAM)/pkg/controllers/podgroup_controller.go
 	rm -rf $(CLONE_UPSTREAM)/cmd/controller/app/server.go
 	cp -R sig-scheduler-plugins/pkg/fluence $(CLONE_UPSTREAM)/pkg/fluence
 	cp -R sig-scheduler-plugins/pkg/controllers/* $(CLONE_UPSTREAM)/pkg/controllers/
 	# This is the one exception not from sig-scheduler-plugins because it is needed in both spots
 	cp -R src/fluence/fluxcli-grpc $(CLONE_UPSTREAM)/pkg/fluence/fluxcli-grpc
+	# cp -R sig-scheduler-plugins/cmd/app ./upstream/cmd/app
 	# These are files with subtle changes to add fluence
 	cp sig-scheduler-plugins/cmd/scheduler/main.go ./upstream/cmd/scheduler/main.go
 	cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/templates/*.yaml $(CLONE_UPSTREAM)/manifests/install/charts/as-a-second-scheduler/templates/
