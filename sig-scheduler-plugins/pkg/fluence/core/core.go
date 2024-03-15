@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
+	"sigs.k8s.io/scheduler-plugins/pkg/logger"
 	"sigs.k8s.io/scheduler-plugins/pkg/util"
 )
 
@@ -84,10 +85,17 @@ type PodGroupManager struct {
 	// Probably should just choose one... oh well
 	sync.RWMutex
 	mutex sync.Mutex
+	log   *logger.DebugLogger
 }
 
 // NewPodGroupManager creates a new operation object.
-func NewPodGroupManager(client client.Client, snapshotSharedLister framework.SharedLister, scheduleTimeout *time.Duration, podInformer informerv1.PodInformer) *PodGroupManager {
+func NewPodGroupManager(
+	client client.Client,
+	snapshotSharedLister framework.SharedLister,
+	scheduleTimeout *time.Duration,
+	podInformer informerv1.PodInformer,
+	log *logger.DebugLogger,
+) *PodGroupManager {
 	pgMgr := &PodGroupManager{
 		client:               client,
 		snapshotSharedLister: snapshotSharedLister,
@@ -97,6 +105,7 @@ func NewPodGroupManager(client client.Client, snapshotSharedLister framework.Sha
 		backedOffPG:          gochache.New(10*time.Second, 10*time.Second),
 		groupToJobId:         map[string]uint64{},
 		podToNode:            map[string]string{},
+		log:                  log,
 	}
 	return pgMgr
 }
@@ -126,13 +135,14 @@ func (pgMgr *PodGroupManager) PreFilter(
 	state *framework.CycleState,
 ) error {
 
-	klog.V(5).InfoS("Pre-filter", "pod", klog.KObj(pod))
+	pgMgr.log.Info("[PodGroup PreFilter] pod %s", klog.KObj(pod))
 	pgFullName, pg := pgMgr.GetPodGroup(ctx, pod)
 	if pg == nil {
 		return nil
 	}
 
-	if _, exist := pgMgr.backedOffPG.Get(pgFullName); exist {
+	_, exist := pgMgr.backedOffPG.Get(pgFullName)
+	if exist {
 		return fmt.Errorf("podGroup %v failed recently", pgFullName)
 	}
 
@@ -147,7 +157,7 @@ func (pgMgr *PodGroupManager) PreFilter(
 	statuses := pgMgr.GetStatuses(pods)
 
 	// This shows us the number of pods we have in the set and their states
-	klog.Infof("Fluence Pre-filter", "group", pgFullName, "pods", statuses, "MinMember", pg.Spec.MinMember, "Size", len(pods))
+	pgMgr.log.Info("[PodGroup PreFilter] group: %s pods: %s MinMember: %d Size: %d", pgFullName, statuses, pg.Spec.MinMember, len(pods))
 	if len(pods) < int(pg.Spec.MinMember) {
 		return fmt.Errorf("pre-filter pod %v cannot find enough sibling pods, "+
 			"current pods number: %v, minMember of group: %v", pod.Name, len(pods), pg.Spec.MinMember)
@@ -164,7 +174,8 @@ func (pgMgr *PodGroupManager) PreFilter(
 	// TODO(cwdsuzhou): This resource check may not always pre-catch unschedulable pod group.
 	// It only tries to PreFilter resource constraints so even if a PodGroup passed here,
 	// it may not necessarily pass Filter due to other constraints such as affinity/taints.
-	if _, ok := pgMgr.permittedPG.Get(pgFullName); ok {
+	_, ok := pgMgr.permittedPG.Get(pgFullName)
+	if ok {
 		return nil
 	}
 
@@ -173,14 +184,14 @@ func (pgMgr *PodGroupManager) PreFilter(
 	repPod := pods[0]
 	nodes, err := pgMgr.AskFlux(ctx, *repPod, pg, pgFullName)
 	if err != nil {
-		klog.Infof("[Fluence] Fluxion returned an error %s, not schedulable", err.Error())
+		pgMgr.log.Info("[PodGroup PreFilter] Fluxion returned an error %s, not schedulable", err.Error())
 		return err
 	}
-	klog.Infof("Node Selected %s (pod group %s)", nodes, pgFullName)
+	pgMgr.log.Info("Node Selected %s (pod group %s)", nodes, pgFullName)
 
 	// Some reason fluxion gave us the wrong size?
 	if len(nodes) != len(pods) {
-		klog.Info("Warning - group %s needs %d nodes but Fluxion returned the wrong number nodes %d.", pgFullName, len(pods), len(nodes))
+		pgMgr.log.Warning("[PodGroup PreFilter] group %s needs %d nodes but Fluxion returned the wrong number nodes %d.", pgFullName, len(pods), len(nodes))
 		pgMgr.mutex.Lock()
 		pgMgr.cancelFluxJob(pgFullName, repPod)
 		pgMgr.mutex.Unlock()
@@ -235,39 +246,4 @@ func (pgMgr *PodGroupManager) GetPodGroup(ctx context.Context, pod *corev1.Pod) 
 // GetNamespacedName returns the namespaced name.
 func GetNamespacedName(obj metav1.Object) string {
 	return fmt.Sprintf("%v/%v", obj.GetNamespace(), obj.GetName())
-}
-
-func getNodeResource(info *framework.NodeInfo, desiredPodGroupName string) *framework.Resource {
-	nodeClone := info.Clone()
-	for _, podInfo := range info.Pods {
-		if podInfo == nil || podInfo.Pod == nil {
-			continue
-		}
-		if util.GetPodGroupFullName(podInfo.Pod) != desiredPodGroupName {
-			continue
-		}
-		nodeClone.RemovePod(podInfo.Pod)
-	}
-
-	leftResource := framework.Resource{
-		ScalarResources: make(map[corev1.ResourceName]int64),
-	}
-	allocatable := nodeClone.Allocatable
-	requested := nodeClone.Requested
-
-	leftResource.AllowedPodNumber = allocatable.AllowedPodNumber - len(nodeClone.Pods)
-	leftResource.MilliCPU = allocatable.MilliCPU - requested.MilliCPU
-	leftResource.Memory = allocatable.Memory - requested.Memory
-	leftResource.EphemeralStorage = allocatable.EphemeralStorage - requested.EphemeralStorage
-
-	for k, allocatableEx := range allocatable.ScalarResources {
-		requestEx, ok := requested.ScalarResources[k]
-		if !ok {
-			leftResource.ScalarResources[k] = allocatableEx
-		} else {
-			leftResource.ScalarResources[k] = allocatableEx - requestEx
-		}
-	}
-	klog.V(4).InfoS("Node left resource", "node", klog.KObj(info.Node()), "resource", leftResource)
-	return &leftResource
 }

@@ -405,6 +405,8 @@ func (r *PodGroupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
+// ensurePodGroup ensures we create the pod group (or delete) when pod is deleted
+// for delete, this would be better done as an owner reference., but I haven't gotten it working
 func (r *PodGroupReconciler) ensurePodGroup(ctx context.Context, obj client.Object) []ctrl.Request {
 	pod, ok := obj.(*v1.Pod)
 	if !ok {
@@ -415,6 +417,18 @@ func (r *PodGroupReconciler) ensurePodGroup(ctx context.Context, obj client.Obje
 	// This case only happens when something is not scheduled by fluence
 	if len(groupName) == 0 {
 		r.log.Info("Pod: ", "Name", pod.Name, "Status", pod.Status.Phase, "Action", "Not fluence owned")
+		return nil
+	}
+
+	// If we deleted the pod... assume we delete the group too
+	if !pod.ObjectMeta.DeletionTimestamp.IsZero() {
+		r.log.Info("Pod: ", "Name", pod.Name, "Status", pod.Status.Phase, "Action", "Deleted")
+
+		pg := &schedv1alpha1.PodGroup{}
+		err := r.Get(ctx, types.NamespacedName{Name: groupName, Namespace: pod.Namespace}, pg)
+		if err != nil {
+			r.Delete(ctx, pg)
+		}
 		return nil
 	}
 
