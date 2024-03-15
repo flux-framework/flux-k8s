@@ -1,161 +1,249 @@
+/*
+Copyright 2020 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package core
 
 import (
+	"context"
 	"fmt"
+	"sync"
+	"time"
 
+	gochache "github.com/patrickmn/go-cache"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
+	informerv1 "k8s.io/client-go/informers/core/v1"
+	listerv1 "k8s.io/client-go/listers/core/v1"
 	klog "k8s.io/klog/v2"
 
 	"k8s.io/kubernetes/pkg/scheduler/framework"
-	pb "sigs.k8s.io/scheduler-plugins/pkg/fluence/fluxcli-grpc"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
+	"sigs.k8s.io/scheduler-plugins/pkg/logger"
+	"sigs.k8s.io/scheduler-plugins/pkg/util"
 )
 
-// FluxStateData is a CycleState
-// It holds the PodCache for a pod, which has node assignment, group, and group size
-// We also save the group name and size, and time created, in case we want to (somehow) resume scheduling
-// In practice I'm not sure how CycleState objects are dumped and loaded. Kueue has a dumper :P
-// https://github.com/kubernetes/enhancements/blob/master/keps/sig-scheduling/624-scheduling-framework/README.md#cyclestate
+// TODO should eventually store group name here to reassociate on reload
 type FluxStateData struct {
-	NodeCache NodeCache
-}
-
-// Clone is required for CycleState plugins
-func (s *FluxStateData) Clone() framework.StateData {
-	return &FluxStateData{NodeCache: s.NodeCache}
-}
-
-// NewFluxState creates an entry for the CycleState with the node and group name
-func NewFluxState(nodeName string, groupName string) *FluxStateData {
-	cache := NodeCache{NodeName: nodeName}
-	return &FluxStateData{NodeCache: cache}
-}
-
-// NodeCache holds the node name and tasks for the node
-// For the PodGroupCache, these are organized by group name,
-// and there is a list of them
-type NodeCache struct {
 	NodeName string
-
-	// Tie assignment back to PodGroup, which can be used to get size and time created
-	GroupName string
-
-	// Assigned tasks (often pods) to nodes
-	// https://github.com/flux-framework/flux-k8s/blob/9f24f36752e3cced1b1112d93bfa366fb58b3c84/src/fluence/fluxion/fluxion.go#L94-L97
-	AssignedTasks int
 }
 
-// A pod group cache holds a list of nodes for an allocation, where each has some number of tasks
-// along with the expected group size. This is intended to replace PodGroup
-// given the group name, size (derived from annotations) and timestamp
-type PodGroupCache struct {
-	GroupName string
-
-	// This is a cache of nodes for pods
-	Nodes []NodeCache
+func (s *FluxStateData) Clone() framework.StateData {
+	clone := &FluxStateData{
+		NodeName: s.NodeName,
+	}
+	return clone
 }
 
-// PodGroups seen by fluence
-var groupsSeen map[string]*PodGroupCache
-
-// Init populates the groupsSeen cache
-func Init() {
-	groupsSeen = map[string]*PodGroupCache{}
+// Manager defines the interfaces for PodGroup management.
+type Manager interface {
+	PreFilter(context.Context, *corev1.Pod, *framework.CycleState) error
+	GetPodNode(*corev1.Pod) string
+	GetPodGroup(context.Context, *corev1.Pod) (string, *v1alpha1.PodGroup)
+	GetCreationTimestamp(*corev1.Pod, time.Time) time.Time
+	DeletePermittedPodGroup(string)
 }
 
-// GetFluenceCache determines if a group has been seen.
-// Yes -> we return the PodGroupCache entry
-// No -> the entry is nil / does not exist
-func GetFluenceCache(groupName string) *PodGroupCache {
-	entry, _ := groupsSeen[groupName]
-	return entry
+// PodGroupManager defines the scheduling operation called
+type PodGroupManager struct {
+	// client is a generic controller-runtime client to manipulate both core resources and PodGroups.
+	client client.Client
+	// snapshotSharedLister is pod shared list
+	snapshotSharedLister framework.SharedLister
+	// scheduleTimeout is the default timeout for podgroup scheduling.
+	// If podgroup's scheduleTimeoutSeconds is set, it will be used.
+	scheduleTimeout *time.Duration
+	// permittedPG stores the podgroup name which has passed the pre resource check.
+	permittedPG *gochache.Cache
+	// backedOffPG stores the podgorup name which failed scheudling recently.
+	backedOffPG *gochache.Cache
+	// podLister is pod lister
+	podLister listerv1.PodLister
+
+	// This isn't great to save state, but we can improve upon it
+	// we should have a way to load jobids into this if fluence is recreated
+	// If we can annotate them in fluxion and query for that, we can!
+	groupToJobId map[string]uint64
+	podToNode    map[string]string
+
+	// Probably should just choose one... oh well
+	sync.RWMutex
+	mutex sync.Mutex
+	log   *logger.DebugLogger
 }
 
-// DeletePodGroup deletes a pod from the group cache
-func DeletePodGroup(groupName string) {
-	delete(groupsSeen, groupName)
+// NewPodGroupManager creates a new operation object.
+func NewPodGroupManager(
+	client client.Client,
+	snapshotSharedLister framework.SharedLister,
+	scheduleTimeout *time.Duration,
+	podInformer informerv1.PodInformer,
+	log *logger.DebugLogger,
+) *PodGroupManager {
+	pgMgr := &PodGroupManager{
+		client:               client,
+		snapshotSharedLister: snapshotSharedLister,
+		scheduleTimeout:      scheduleTimeout,
+		podLister:            podInformer.Lister(),
+		permittedPG:          gochache.New(3*time.Second, 3*time.Second),
+		backedOffPG:          gochache.New(10*time.Second, 10*time.Second),
+		groupToJobId:         map[string]uint64{},
+		podToNode:            map[string]string{},
+		log:                  log,
+	}
+	return pgMgr
 }
 
-// CreateNodePodsList creates a list of node pod caches
-func CreateNodeList(nodelist []*pb.NodeAlloc, groupName string) (nodepods []NodeCache) {
+// GetStatuses string (of all pods) to show for debugging purposes
+func (pgMgr *PodGroupManager) GetStatuses(pods []*corev1.Pod) string {
+	statuses := ""
+	for _, pod := range pods {
+		statuses += " " + fmt.Sprintf("%s", pod.Status.Phase)
+	}
+	return statuses
+}
 
-	// Create a pod cache for each node
-	nodepods = make([]NodeCache, len(nodelist))
+// GetPodNode is a quick lookup to see if we have a node
+func (pgMgr *PodGroupManager) GetPodNode(pod *corev1.Pod) string {
+	node, _ := pgMgr.podToNode[pod.Name]
+	return node
+}
 
-	// TODO: should we be integrating topology information here? Could it be the
-	// case that some nodes (pods) in the group should be closer?
-	for i, v := range nodelist {
-		nodepods[i] = NodeCache{
-			NodeName:      v.GetNodeID(),
-			AssignedTasks: int(v.GetTasks()),
-			GroupName:     groupName,
-		}
+// PreFilter filters out a pod if
+// 1. it belongs to a podgroup that was recently denied or
+// 2. the total number of pods in the podgroup is less than the minimum number of pods
+// that is required to be scheduled.
+func (pgMgr *PodGroupManager) PreFilter(
+	ctx context.Context,
+	pod *corev1.Pod,
+	state *framework.CycleState,
+) error {
+
+	pgMgr.log.Info("[PodGroup PreFilter] pod %s", klog.KObj(pod))
+	pgFullName, pg := pgMgr.GetPodGroup(ctx, pod)
+	if pg == nil {
+		return nil
 	}
 
-	// Update the pods in the PodGroupCache (groupsSeen)
-	updatePodGroupCache(groupName, nodepods)
-	return nodepods
+	_, exist := pgMgr.backedOffPG.Get(pgFullName)
+	if exist {
+		return fmt.Errorf("podGroup %v failed recently", pgFullName)
+	}
+
+	pods, err := pgMgr.podLister.Pods(pod.Namespace).List(
+		labels.SelectorFromSet(labels.Set{v1alpha1.PodGroupLabel: util.GetPodGroupLabel(pod)}),
+	)
+	if err != nil {
+		return fmt.Errorf("podLister list pods failed: %w", err)
+	}
+
+	// Get statuses to show for debugging
+	statuses := pgMgr.GetStatuses(pods)
+
+	// This shows us the number of pods we have in the set and their states
+	pgMgr.log.Info("[PodGroup PreFilter] group: %s pods: %s MinMember: %d Size: %d", pgFullName, statuses, pg.Spec.MinMember, len(pods))
+	if len(pods) < int(pg.Spec.MinMember) {
+		return fmt.Errorf("pre-filter pod %v cannot find enough sibling pods, "+
+			"current pods number: %v, minMember of group: %v", pod.Name, len(pods), pg.Spec.MinMember)
+	}
+
+	// TODO we likely can take advantage of these resources or other custom
+	// attributes we add. For now ignore and calculate based on pod needs (above)
+	// if pg.Spec.MinResources == nil {
+	//	fmt.Printf("Fluence Min resources are null, skipping PreFilter")
+	//	return nil
+	// }
+
+	// This is from coscheduling.
+	// TODO(cwdsuzhou): This resource check may not always pre-catch unschedulable pod group.
+	// It only tries to PreFilter resource constraints so even if a PodGroup passed here,
+	// it may not necessarily pass Filter due to other constraints such as affinity/taints.
+	_, ok := pgMgr.permittedPG.Get(pgFullName)
+	if ok {
+		return nil
+	}
+
+	// TODO: right now we ask Fluxion for a podspec based on ONE pod, but
+	// we have the whole group! We can handle different pod needs now :)
+	repPod := pods[0]
+	nodes, err := pgMgr.AskFlux(ctx, *repPod, pg, pgFullName)
+	if err != nil {
+		pgMgr.log.Info("[PodGroup PreFilter] Fluxion returned an error %s, not schedulable", err.Error())
+		return err
+	}
+	pgMgr.log.Info("Node Selected %s (pod group %s)", nodes, pgFullName)
+
+	// Some reason fluxion gave us the wrong size?
+	if len(nodes) != len(pods) {
+		pgMgr.log.Warning("[PodGroup PreFilter] group %s needs %d nodes but Fluxion returned the wrong number nodes %d.", pgFullName, len(pods), len(nodes))
+		pgMgr.mutex.Lock()
+		pgMgr.cancelFluxJob(pgFullName, repPod)
+		pgMgr.mutex.Unlock()
+	}
+
+	// Create a fluxState (CycleState) with all nodes - this is used to retrieve
+	// the specific node assigned to the pod in Filter, which returns a node
+	// Note that this probably is not useful beyond the pod we are in the context
+	// of, but why not do it.
+	for i, node := range nodes {
+		pod := pods[i]
+		stateData := FluxStateData{NodeName: node}
+		state.Write(framework.StateKey(pod.Name), &stateData)
+		// Also save to the podToNode lookup
+		pgMgr.podToNode[pod.Name] = node
+	}
+	pgMgr.permittedPG.Add(pgFullName, pgFullName, *pgMgr.scheduleTimeout)
+	return nil
 }
 
-// updatePodGroupList updates the PodGroupCache with a listing of nodes
-func updatePodGroupCache(groupName string, nodes []NodeCache) {
-	cache := PodGroupCache{
-		Nodes:     nodes,
-		GroupName: groupName,
+// GetCreationTimestamp returns the creation time of a podGroup or a pod.
+func (pgMgr *PodGroupManager) GetCreationTimestamp(pod *corev1.Pod, ts time.Time) time.Time {
+	pgName := util.GetPodGroupLabel(pod)
+	if len(pgName) == 0 {
+		return ts
 	}
-	groupsSeen[groupName] = &cache
+	var pg v1alpha1.PodGroup
+	if err := pgMgr.client.Get(context.TODO(), types.NamespacedName{Namespace: pod.Namespace, Name: pgName}, &pg); err != nil {
+		return ts
+	}
+	return pg.CreationTimestamp.Time
 }
 
-// GetNextNode gets the next node in the PodGroupCache
-func (p *PodGroupCache) GetNextNode() (string, error) {
-
-	nextnode := ""
-
-	// Quick failure state - we ran out of nodes
-	if len(p.Nodes) == 0 {
-		return nextnode, fmt.Errorf("[Fluence] PodGroup %s ran out of nodes.", p.GroupName)
-	}
-
-	// The next is the 0th in the list
-	nextnode = p.Nodes[0].NodeName
-	klog.Infof("[Fluence] Next node for group %s is %s", p.GroupName, nextnode)
-
-	// If there is only one task left, we are going to use it (and remove the node)
-	if p.Nodes[0].AssignedTasks == 1 {
-		klog.Infof("[Fluence] First node has one remaining task slot")
-		slice := p.Nodes[1:]
-
-		// If after we remove the node there are no nodes left...
-		// Note that I'm not deleting the node from the cache because that is the
-		// only way fluence knows it has already assigned work (presence of the key)
-		if len(slice) == 0 {
-			klog.Infof("[Fluence] Assigning node %s. There are NO reamining nodes for group %s\n", nextnode, p.GroupName)
-			// delete(podGroupCache, groupName)
-			return nextnode, nil
-		}
-
-		klog.Infof("[Fluence] Assigning node %s. There are nodes left for group", nextnode, p.GroupName)
-		updatePodGroupCache(p.GroupName, slice)
-		return nextnode, nil
-	}
-
-	// If we get here the first node had >1 assigned tasks
-	klog.Infof("[Fluence] Assigning node %s for group %s. There are still task assignments available for this node.", nextnode, p.GroupName)
-	p.Nodes[0].AssignedTasks = p.Nodes[0].AssignedTasks - 1
-	return nextnode, nil
+// DeletePermittedPodGroup deletes a podGroup that passes Pre-Filter but reaches PostFilter.
+func (pgMgr *PodGroupManager) DeletePermittedPodGroup(pgFullName string) {
+	pgMgr.permittedPG.Delete(pgFullName)
 }
 
-// GetNextNode gets the next available node we can allocate for a group
-// TODO this should be able to take and pass forward a number of tasks.
-// It is implicity 1 now, but doesn't have to be.
-func GetNextNode(groupName string) (string, error) {
-
-	// Get our entry from the groupsSeen cache
-	klog.Infof("[Fluence] groups seen %s", groupsSeen)
-	entry, ok := groupsSeen[groupName]
-
-	// This case should not happen
-	if !ok {
-		return "", fmt.Errorf("[Fluence] Map is empty")
+// GetPodGroup returns the PodGroup that a Pod belongs to in cache.
+func (pgMgr *PodGroupManager) GetPodGroup(ctx context.Context, pod *corev1.Pod) (string, *v1alpha1.PodGroup) {
+	pgName := util.GetPodGroupLabel(pod)
+	if len(pgName) == 0 {
+		return "", nil
 	}
-	// Get the next node from the PodGroupCache
-	return entry.GetNextNode()
+	var pg v1alpha1.PodGroup
+	if err := pgMgr.client.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: pgName}, &pg); err != nil {
+		return fmt.Sprintf("%v/%v", pod.Namespace, pgName), nil
+	}
+	return fmt.Sprintf("%v/%v", pod.Namespace, pgName), &pg
+}
+
+// GetNamespacedName returns the namespaced name.
+func GetNamespacedName(obj metav1.Object) string {
+	return fmt.Sprintf("%v/%v", obj.GetNamespace(), obj.GetName())
 }

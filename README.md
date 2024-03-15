@@ -6,6 +6,14 @@ Fluence enables HPC-grade pod scheduling in Kubernetes via the [Kubernetes Sched
 
 **Important** Fluence does not currently support use in conjunction with the kube-scheduler. Pods must all be scheduled by Fluence, and *you should not use both schedulers in the same cluster*.
 
+## TODO
+
+- On init, need to load in resource graph that accounts for running stuff
+- Need to allow for restart / crashes and looking up existing jobid, updating maps in PodGroup
+- Since AskFlux is done on level of pod group, refactor function to account for specific resources of all pods (not just one pod)
+- Figure out if EventsToRegister replaces old informer
+- Would be nice to see the state of fluxion (retest the kubectl-fluence plugin)
+
 ## Getting started
 
 For instructions on how to start Fluence on a K8s cluster, see [examples](examples/). Documentation and instructions for reproducing our CANOPIE-2022 paper (citation below) can be found in the [canopie22-artifacts branch](https://github.com/flux-framework/flux-k8s/tree/canopie22-artifacts).
@@ -501,6 +509,14 @@ The last step ensures we use the images we loaded! You can basically just do:
 
 This sped up my development time immensely. If you want to manually do the steps, see that script for instructions.
 
+#### Logging
+
+For easier viewing of what fluence is doing (in the sig-scheduler-plugins) we have a file logger that can be seen in the container:
+
+```bash
+$ kubectl exec -it fluence-68c4c586c6-nktdl -c scheduler-plugins-scheduler -- cat /tmp/fluence.log
+```
+
 ##### kubectl plugin
 
 Note that if you want to enable extra endpoints for the fluence kubectl plugin and expose the GRPC as a service, you can do:
@@ -519,13 +535,6 @@ For this setup if you are developing locally with kind, you will need to enable 
 ```bash
 kind create cluster --config ./kind-config.yaml
 ```
-
-#### TODO
-
- - Try what [kueue does](https://github.com/kubernetes-sigs/kueue/blob/6d57813a52066dab412735deeeb60ebb0cdb8e8e/cmd/kueue/main.go#L146-L155) to not require cert-manager.
- - Try other strategies for setting owner references (so cleans up when owner deleted)
-   - When that is done, add tests for deletion of pod group (the current method is not perfect and needs improvement)
-- We really need to see the state of fluxion - I had this running for about 6 hours in kind, and at some point it just stopped working. I deleted and re-created the cluster and it was restored. It could be a development hiccup but would be good to know!
 
 #### Components
 

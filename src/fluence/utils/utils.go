@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	klog "k8s.io/klog/v2"
+
 	"encoding/json"
 
 	"github.com/flux-framework/flux-k8s/flux-plugin/fluence/jgf"
@@ -20,7 +22,56 @@ var (
 	controlPlaneLabel = "node-role.kubernetes.io/control-plane"
 )
 
+// RegisterExisting uses the in cluster API to get existing pods
+// This is actually the same as computeTotalRequests but I wanted to compare the two
+// It is currently not being used. The main difference is that below, we are essentially
+// rounding the cpu to the smaller unit (logically for the graph) but losing some
+// granularity, if we think "milli" values have feet.
+func RegisterExisting(clientset *kubernetes.Clientset, ctx context.Context) (map[string]PodSpec, error) {
+
+	// We are using PodSpec as a holder for a *summary* of cpu/memory being used
+	// by the node, it is a summation across pods we find on each one
+	nodes := map[string]PodSpec{}
+
+	// get pods in all the namespaces by omitting namespace
+	// Or specify namespace to get pods in particular namespace
+	pods, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		klog.Infof("Error listing pods: %s\n", err)
+		return nodes, err
+	}
+	klog.Infof("Found %d existing pods in the cluster\n", len(pods.Items))
+
+	// Create a new PodSpec for each
+	for _, pod := range pods.Items {
+
+		// Add the node to our lookup if we don't have it yet
+		_, ok := nodes[pod.Spec.NodeName]
+		if !ok {
+			nodes[pod.Spec.NodeName] = PodSpec{}
+		}
+		ps := nodes[pod.Spec.NodeName]
+
+		for _, container := range pod.Spec.Containers {
+			specRequests := container.Resources.Requests
+			ps.Cpu += int32(specRequests.Cpu().Value())
+			ps.Memory += specRequests.Memory().Value()
+			ps.Storage += specRequests.StorageEphemeral().Value()
+
+			specLimits := container.Resources.Limits
+			gpuSpec := specLimits["nvidia.com/gpu"]
+			ps.Gpu += gpuSpec.Value()
+		}
+		nodes[pod.Spec.NodeName] = ps
+	}
+	return nodes, nil
+}
+
 // CreateJGF creates the Json Graph Format
+// We currently don't have support in fluxion to allocate jobs for existing pods,
+// so instead we create the graph with fewer resources. When that support is
+// added (see sig-scheduler-plugins/pkg/fluence/register.go) we can
+// remove the adjustment here, which is more of a hack
 func CreateJGF(filename string, skipLabel *string) error {
 	ctx := context.Background()
 	config, err := rest.InClusterConfig()
@@ -28,16 +79,19 @@ func CreateJGF(filename string, skipLabel *string) error {
 		fmt.Println("Error getting InClusterConfig")
 		return err
 	}
-	// creates the clientset
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		fmt.Println("Error getting ClientSet")
+		fmt.Printf("Error getting ClientSet: %s", err)
 		return err
 	}
 	nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		fmt.Printf("Error listing nodes: %s", err)
+		return err
+	}
 
-	var fluxgraph jgf.Fluxjgf
-	fluxgraph = jgf.InitJGF()
+	// Create a Flux Json Graph Format (JGF) with all cluster nodes
+	fluxgraph := jgf.InitJGF()
 
 	// TODO it looks like we can add more to the graph here -
 	// let's remember to consider what else we can.
@@ -53,11 +107,11 @@ func CreateJGF(filename string, skipLabel *string) error {
 
 	vcores := 0
 	fmt.Println("Number nodes ", len(nodes.Items))
-	var totalAllocCpu, totalmem int64
+	var totalAllocCpu int64
 	totalAllocCpu = 0
 	sdnCount := 0
 
-	for node_index, node := range nodes.Items {
+	for nodeIndex, node := range nodes.Items {
 
 		// We should not be scheduling to the control plane
 		_, ok := node.Labels[controlPlaneLabel]
@@ -71,107 +125,121 @@ func CreateJGF(filename string, skipLabel *string) error {
 		if *skipLabel != "" {
 			_, ok := node.Labels[*skipLabel]
 			if ok {
-				fmt.Println("Skipping node ", node.GetName())
+				fmt.Printf("Skipping node %s\n", node.GetName())
 				continue
 			}
 		}
 
-		fmt.Println("node in flux group ", node.GetName())
-		if !node.Spec.Unschedulable {
-			fieldselector, err := fields.ParseSelector("spec.nodeName=" + node.GetName() + ",status.phase!=" + string(corev1.PodSucceeded) + ",status.phase!=" + string(corev1.PodFailed))
-			if err != nil {
-				return err
+		if node.Spec.Unschedulable {
+			fmt.Printf("Skipping node %s, unschedulable\n", node.GetName())
+			continue
+		}
+
+		fieldselector, err := fields.ParseSelector("spec.nodeName=" + node.GetName() + ",status.phase!=" + string(corev1.PodSucceeded) + ",status.phase!=" + string(corev1.PodFailed))
+		if err != nil {
+			return err
+		}
+		pods, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
+			FieldSelector: fieldselector.String(),
+		})
+		if err != nil {
+			return err
+		}
+
+		// Check if subnet already exists
+		// Here we build subnets according to topology.kubernetes.io/zone label
+		subnetName := node.Labels["topology.kubernetes.io/zone"]
+		subnet := fluxgraph.MakeSubnet(sdnCount, subnetName)
+		sdnCount = sdnCount + 1
+		fluxgraph.MakeEdge(cluster, subnet, "contains")
+		fluxgraph.MakeEdge(subnet, cluster, "in")
+
+		// These are requests for existing pods, for cpu and memory
+		reqs := computeTotalRequests(pods)
+		cpuReqs := reqs[corev1.ResourceCPU]
+		memReqs := reqs[corev1.ResourceMemory]
+
+		// Actual values that we have available (minus requests)
+		totalCpu := node.Status.Allocatable.Cpu().MilliValue()
+		totalMem := node.Status.Allocatable.Memory().Value()
+
+		// Values accounting for requests
+		availCpu := int64((totalCpu - cpuReqs.MilliValue()) / 1000)
+		availMem := totalMem - memReqs.Value()
+
+		// Show existing to compare to
+		fmt.Printf("\n📦️ %s\n", node.GetName())
+		fmt.Printf("      allocated cpu: %d\n", cpuReqs.Value())
+		fmt.Printf("      allocated mem: %d\n", memReqs.Value())
+		fmt.Printf("      available cpu: %d\n", availCpu)
+		fmt.Printf("       running pods: %d\n", len(pods.Items))
+
+		// keep track of overall total
+		totalAllocCpu += availCpu
+		fmt.Printf("      available mem: %d\n", availMem)
+		gpuAllocatable, hasGpuAllocatable := node.Status.Allocatable["nvidia.com/gpu"]
+
+		// reslist := node.Status.Allocatable
+		// resources := make([]corev1.ResourceName, 0, len(reslist))
+		// for resource := range reslist {
+		// 	fmt.Println("resource ", resource)
+		// 	resources = append(resources, resource)
+		// }
+		// for _, resource := range resources {
+		// 	value := reslist[resource]
+
+		// 	fmt.Printf(" %s:\t%s\n", resource, value.String())
+		// }
+
+		workernode := fluxgraph.MakeNode(nodeIndex, false, node.Name)
+		fluxgraph.MakeEdge(subnet, workernode, "contains") // this is rack otherwise
+		fluxgraph.MakeEdge(workernode, subnet, "in")       // this is rack otherwise
+
+		// socket := fluxgraph.MakeSocket(0, "socket")
+		// fluxgraph.MakeEdge(workernode, socket, "contains")
+		// fluxgraph.MakeEdge(socket, workernode, "in")
+
+		if hasGpuAllocatable {
+			fmt.Println("GPU Resource quantity ", gpuAllocatable.Value())
+			//MakeGPU(index int, name string, size int) string {
+			for index := 0; index < int(gpuAllocatable.Value()); index++ {
+				gpu := fluxgraph.MakeGPU(index, "nvidiagpu", 1)
+				fluxgraph.MakeEdge(workernode, gpu, "contains") // workernode was socket
+				fluxgraph.MakeEdge(gpu, workernode, "in")
 			}
-			pods, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
-				FieldSelector: fieldselector.String(),
-			})
-			if err != nil {
-				return err
-			}
 
-			// fmt.Println("Node ", node.GetName(), " has pods ", pods)
-			// Check if subnet already exists
-			// Here we build subnets according to topology.kubernetes.io/zone label
-			subnetName := node.Labels["topology.kubernetes.io/zone"]
-			subnet := fluxgraph.MakeSubnet(sdnCount, subnetName)
-			sdnCount = sdnCount + 1
-			fluxgraph.MakeEdge(cluster, subnet, "contains")
-			fluxgraph.MakeEdge(subnet, cluster, "in")
+		}
 
-			reqs := computeTotalRequests(pods)
-			cpuReqs := reqs[corev1.ResourceCPU]
-			memReqs := reqs[corev1.ResourceMemory]
+		for index := 0; index < int(availCpu); index++ {
+			// MakeCore(index int, name string)
+			core := fluxgraph.MakeCore(index, "core")
+			fluxgraph.MakeEdge(workernode, core, "contains") // workernode was socket
+			fluxgraph.MakeEdge(core, workernode, "in")
 
-			avail := node.Status.Allocatable.Cpu().MilliValue()
-			totalcpu := int64((avail - cpuReqs.MilliValue()) / 1000) //- 1
-			fmt.Println("Node ", node.GetName(), " flux cpu ", totalcpu)
-			totalAllocCpu = totalAllocCpu + totalcpu
-			totalmem = node.Status.Allocatable.Memory().Value() - memReqs.Value()
-			fmt.Println("Node ", node.GetName(), " total mem ", totalmem)
-			gpuAllocatable, hasGpuAllocatable := node.Status.Allocatable["nvidia.com/gpu"]
-
-			// reslist := node.Status.Allocatable
-			// resources := make([]corev1.ResourceName, 0, len(reslist))
-			// for resource := range reslist {
-			// 	fmt.Println("resource ", resource)
-			// 	resources = append(resources, resource)
-			// }
-			// for _, resource := range resources {
-			// 	value := reslist[resource]
-
-			// 	fmt.Printf(" %s:\t%s\n", resource, value.String())
-			// }
-
-			workernode := fluxgraph.MakeNode(node_index, false, node.Name)
-			fluxgraph.MakeEdge(subnet, workernode, "contains") // this is rack otherwise
-			fluxgraph.MakeEdge(workernode, subnet, "in")       // this is rack otherwise
-
-			// socket := fluxgraph.MakeSocket(0, "socket")
-			// fluxgraph.MakeEdge(workernode, socket, "contains")
-			// fluxgraph.MakeEdge(socket, workernode, "in")
-
-			if hasGpuAllocatable {
-				fmt.Println("GPU Resource quantity ", gpuAllocatable.Value())
-				//MakeGPU(index int, name string, size int) string {
-				for index := 0; index < int(gpuAllocatable.Value()); index++ {
-					gpu := fluxgraph.MakeGPU(index, "nvidiagpu", 1)
-					fluxgraph.MakeEdge(workernode, gpu, "contains") // workernode was socket
-					fluxgraph.MakeEdge(gpu, workernode, "in")
+			// Question from Vanessa:
+			// How can we get here and have vcores ever not equal to zero?
+			if vcores == 0 {
+				fluxgraph.MakeNFDProperties(core, index, "cpu-", &node.Labels)
+				// fluxgraph.MakeNFDProperties(core, index, "netmark-", &node.Labels)
+			} else {
+				for vc := 0; vc < vcores; vc++ {
+					vcore := fluxgraph.MakeVCore(core, vc, "vcore")
+					fluxgraph.MakeNFDProperties(vcore, index, "cpu-", &node.Labels)
 				}
-
-			}
-
-			for index := 0; index < int(totalcpu); index++ {
-				// MakeCore(index int, name string)
-				core := fluxgraph.MakeCore(index, "core")
-				fluxgraph.MakeEdge(workernode, core, "contains") // workernode was socket
-				fluxgraph.MakeEdge(core, workernode, "in")
-
-				// Question from Vanessa:
-				// How can we get here and have vcores ever not equal to zero?
-				if vcores == 0 {
-					fluxgraph.MakeNFDProperties(core, index, "cpu-", &node.Labels)
-					// fluxgraph.MakeNFDProperties(core, index, "netmark-", &node.Labels)
-				} else {
-					for vc := 0; vc < vcores; vc++ {
-						vcore := fluxgraph.MakeVCore(core, vc, "vcore")
-						fluxgraph.MakeNFDProperties(vcore, index, "cpu-", &node.Labels)
-					}
-				}
-			}
-
-			// MakeMemory(index int, name string, unit string, size int)
-			fractionmem := totalmem >> 30
-			// fractionmem := (totalmem/totalcpu) >> 20
-			// fmt.Println("Creating ", fractionmem, " vertices with ", 1<<10, " MB of mem")
-			for i := 0; i < /*int(totalcpu)*/ int(fractionmem); i++ {
-				mem := fluxgraph.MakeMemory(i, "memory", "MB", int(1<<10))
-				fluxgraph.MakeEdge(workernode, mem, "contains")
-				fluxgraph.MakeEdge(mem, workernode, "in")
 			}
 		}
+
+		// MakeMemory(index int, name string, unit string, size int)
+		fractionMem := availMem >> 30
+		// fractionmem := (totalmem/totalcpu) >> 20
+		// fmt.Println("Creating ", fractionmem, " vertices with ", 1<<10, " MB of mem")
+		for i := 0; i < /*int(totalcpu)*/ int(fractionMem); i++ {
+			mem := fluxgraph.MakeMemory(i, "memory", "MB", int(1<<10))
+			fluxgraph.MakeEdge(workernode, mem, "contains")
+			fluxgraph.MakeEdge(mem, workernode, "in")
+		}
 	}
-	fmt.Println("Can request at most ", totalAllocCpu, " exclusive cpu")
+	fmt.Printf("\nCan request at most %d exclusive cpu", totalAllocCpu)
 	err = fluxgraph.WriteJGF(filename)
 	if err != nil {
 		return err
