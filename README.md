@@ -509,6 +509,14 @@ The last step ensures we use the images we loaded! You can basically just do:
 
 This sped up my development time immensely. If you want to manually do the steps, see that script for instructions.
 
+#### Logging
+
+For easier viewing of what fluence is doing (in the sig-scheduler-plugins) we have a file logger that can be seen in the container:
+
+```bash
+$ kubectl exec -it fluence-68c4c586c6-nktdl -c scheduler-plugins-scheduler -- cat /tmp/fluence.log
+```
+
 ##### kubectl plugin
 
 Note that if you want to enable extra endpoints for the fluence kubectl plugin and expose the GRPC as a service, you can do:

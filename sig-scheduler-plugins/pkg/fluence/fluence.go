@@ -25,6 +25,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	klog "k8s.io/klog/v2"
 
+	"sigs.k8s.io/scheduler-plugins/pkg/logger"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientscheme "k8s.io/client-go/kubernetes/scheme"
@@ -50,6 +52,7 @@ type Fluence struct {
 	frameworkHandler framework.Handle
 	pgMgr            fcore.Manager
 	scheduleTimeout  *time.Duration
+	log              *logger.DebugLogger
 }
 
 var (
@@ -69,6 +72,11 @@ func New(obj runtime.Object, handle framework.Handle) (framework.Plugin, error) 
 	// Keep these empty for now, use defaults
 	args := config.CoschedulingArgs{}
 	ctx := context.TODO()
+
+	// Make fluence his own little logger!
+	// This can eventually be a flag, but just going to set for now
+	// It shall be a very chonky file. Oh lawd he comin!
+	l := logger.NewDebugLogger(logger.LevelError, "/tmp/fluence.log")
 
 	scheme := runtime.NewScheme()
 	_ = clientscheme.AddToScheme(scheme)
@@ -92,6 +100,7 @@ func New(obj runtime.Object, handle framework.Handle) (framework.Plugin, error) 
 		&scheduleTimeDuration,
 		// Keep the podInformer (from frameworkHandle) as the single source of Pods.
 		handle.SharedInformerFactory().Core().V1().Pods(),
+		l,
 	)
 
 	// Event handlers to call on pgMgr
@@ -105,8 +114,13 @@ func New(obj runtime.Object, handle framework.Handle) (framework.Plugin, error) 
 		frameworkHandler: handle,
 		pgMgr:            pgMgr,
 		scheduleTimeout:  &scheduleTimeDuration,
+		log:              l,
 	}
-	return plugin, nil
+
+	// TODO this is not supported yet
+	// Account for resources in running cluster
+	err = plugin.RegisterExisting(ctx)
+	return plugin, err
 }
 
 func (f *Fluence) Name() string {
@@ -134,7 +148,7 @@ func (f *Fluence) Filter(
 	nodeInfo *framework.NodeInfo,
 ) *framework.Status {
 
-	klog.Info("Filtering input node ", nodeInfo.Node().Name)
+	f.log.Verbose("[Fluence Filter] Filtering input node %s", nodeInfo.Node().Name)
 	state, err := cycleState.Read(framework.StateKey(pod.Name))
 
 	// No error means we retrieved the state
@@ -147,7 +161,7 @@ func (f *Fluence) Filter(
 		if ok && value.NodeName != nodeInfo.Node().Name {
 			return framework.NewStatus(framework.Unschedulable, "pod is not permitted")
 		} else {
-			klog.Infof("Filter: node %s selected for %s\n", value.NodeName, pod.Name)
+			f.log.Info("[Fluence Filter] node %s selected for %s\n", value.NodeName, pod.Name)
 		}
 	}
 	return framework.NewStatus(framework.Success)
@@ -158,7 +172,6 @@ func (f *Fluence) Filter(
 // 2. Compare the initialization timestamps of PodGroups or Pods.
 // 3. Compare the keys of PodGroups/Pods: <namespace>/<podname>.
 func (f *Fluence) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
-	klog.Infof("ordering pods in fluence scheduler plugin")
 	prio1 := corev1helpers.PodPriority(podInfo1.Pod)
 	prio2 := corev1helpers.PodPriority(podInfo2.Pod)
 	if prio1 != prio2 {
@@ -212,7 +225,7 @@ func (f *Fluence) PreFilter(
 	// This will populate the node name into the pod group manager
 	err := f.pgMgr.PreFilter(ctx, pod, state)
 	if err != nil {
-		klog.ErrorS(err, "PreFilter failed", "pod", klog.KObj(pod))
+		f.log.Error("[Fluence PreFilter] failed pod %s: %s", klog.KObj(pod), err.Error())
 		return nil, framework.NewStatus(framework.UnschedulableAndUnresolvable, err.Error())
 	}
 	node = f.pgMgr.GetPodNode(pod)

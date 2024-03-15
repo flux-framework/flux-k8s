@@ -6,7 +6,6 @@ import (
 
 	"google.golang.org/grpc"
 	"k8s.io/apimachinery/pkg/labels"
-	klog "k8s.io/klog/v2"
 	pb "sigs.k8s.io/scheduler-plugins/pkg/fluence/fluxcli-grpc"
 	fgroup "sigs.k8s.io/scheduler-plugins/pkg/fluence/group"
 
@@ -38,7 +37,7 @@ func (pgMgr *PodGroupManager) AskFlux(
 	// cancel in fluence. What we can do here is assume the previous pods are no longer running
 	// and cancel the flux job to create again.
 	if isAllocated {
-		klog.Info("Warning - group %s was previously allocated and is requesting again, so must have completed.", groupName)
+		pgMgr.log.Warning("[PodGroup AskFlux] group %s was previously allocated and is requesting again, so must have completed.", groupName)
 		pgMgr.mutex.Lock()
 		pgMgr.cancelFluxJob(groupName, &pod)
 		pgMgr.mutex.Unlock()
@@ -49,12 +48,12 @@ func (pgMgr *PodGroupManager) AskFlux(
 	// This obviously may not be true if we have a hetereogenous PodGroup.
 	// We name it based on the group, since it will represent the group
 	jobspec := utils.PreparePodJobSpec(&pod, groupName)
-	klog.Infof("[Fluence] Inspect pod info, jobspec: %s\n", jobspec)
+	pgMgr.log.Info("[PodGroup AskFlux] Inspect pod info, jobspec: %s\n", jobspec)
 	conn, err := grpc.Dial("127.0.0.1:4242", grpc.WithInsecure())
 
 	// TODO change this to just return fmt.Errorf
 	if err != nil {
-		klog.Errorf("[Fluence] Error connecting to server: %v\n", err)
+		pgMgr.log.Error("[PodGroup AskFlux] Error connecting to server: %v\n", err)
 		return nodes, err
 	}
 	defer conn.Close()
@@ -72,12 +71,12 @@ func (pgMgr *PodGroupManager) AskFlux(
 	// An error here is an error with making the request
 	r, err := grpcclient.Match(context.Background(), request)
 	if err != nil {
-		klog.Errorf("[Fluence] did not receive any match response: %v\n", err)
+		pgMgr.log.Warning("[PodGroup AskFlux] did not receive any match response: %v\n", err)
 		return nodes, err
 	}
 
 	// TODO GetPodID should be renamed, because it will reflect the group
-	klog.Infof("[Fluence] Match response ID %s\n", r.GetPodID())
+	pgMgr.log.Info("[PodGroup AskFlux] Match response ID %s\n", r.GetPodID())
 
 	// Get the nodelist and inspect
 	nodelist := r.GetNodelist()
@@ -85,7 +84,7 @@ func (pgMgr *PodGroupManager) AskFlux(
 		nodes = append(nodes, node.NodeID)
 	}
 	jobid := uint64(r.GetJobID())
-	klog.Infof("[Fluence] parsed node pods list %s for job id %d\n", nodes, jobid)
+	pgMgr.log.Info("[PodGroup AskFlux] parsed node pods list %s for job id %d\n", nodes, jobid)
 
 	// TODO would be nice to actually be able to ask flux jobs -a to fluence
 	// That way we can verify assignments, etc.
@@ -103,15 +102,15 @@ func (pgMgr *PodGroupManager) cancelFluxJob(groupName string, pod *corev1.Pod) e
 
 	// The job was already cancelled by another pod
 	if !ok {
-		klog.Infof("[Fluence] Request for cancel of group %s is already complete.", groupName)
+		pgMgr.log.Info("[PodGroup cancelFluxJob] Request for cancel of group %s is already complete.", groupName)
 		return nil
 	}
-	klog.Infof("[Fluence] Cancel flux job: %v for group %s", jobid, groupName)
+	pgMgr.log.Info("[PodGroup cancelFluxJob] Cancel flux job: %v for group %s", jobid, groupName)
 
 	// This first error is about connecting to the server
 	conn, err := grpc.Dial("127.0.0.1:4242", grpc.WithInsecure())
 	if err != nil {
-		klog.Errorf("[Fluence] Error connecting to server: %v", err)
+		pgMgr.log.Error("[PodGroup cancelFluxJob] Error connecting to server: %v", err)
 		return err
 	}
 	defer conn.Close()
@@ -124,17 +123,17 @@ func (pgMgr *PodGroupManager) cancelFluxJob(groupName string, pod *corev1.Pod) e
 	request := &pb.CancelRequest{JobID: int64(jobid)}
 	res, err := grpcclient.Cancel(context.Background(), request)
 	if err != nil {
-		klog.Errorf("[Fluence] did not receive any cancel response: %v", err)
+		pgMgr.log.Error("[PodGroup cancelFluxJob] did not receive any cancel response: %v", err)
 		return err
 	}
-	klog.Infof("[Fluence] Job cancellation for group %s result: %d", groupName, res.Error)
+	pgMgr.log.Info("[PodGroup cancelFluxJob] Job cancellation for group %s result: %d", groupName, res.Error)
 
 	// And this error is if the cancel was successful or not
 	if res.Error == 0 {
-		klog.Infof("[Fluence] Successful cancel of flux job: %d for group %s", jobid, groupName)
+		pgMgr.log.Info("[PodGroup cancelFluxJob] Successful cancel of flux job: %d for group %s", jobid, groupName)
 		pgMgr.cleanup(pod, groupName)
 	} else {
-		klog.Warningf("[Fluence] Failed to cancel flux job %d for group %s", jobid, groupName)
+		pgMgr.log.Warning("[PodGroup cancelFluxJob] Failed to cancel flux job %d for group %s", jobid, groupName)
 	}
 	return nil
 }
@@ -174,7 +173,7 @@ func (pgMgr *PodGroupManager) UpdatePod(oldObj, newObj interface{}) {
 		groupName = pg.Name
 	}
 
-	klog.Infof("[Fluence] Processing event for pod %s in group %s from %s to %s", newPod.Name, groupName, oldPod.Status.Phase, newPod.Status.Phase)
+	pgMgr.log.Verbose("[PodGroup UpdatePod] Processing event for pod %s in group %s from %s to %s", newPod.Name, groupName, oldPod.Status.Phase, newPod.Status.Phase)
 
 	switch newPod.Status.Phase {
 	case corev1.PodPending:
@@ -182,7 +181,7 @@ func (pgMgr *PodGroupManager) UpdatePod(oldObj, newObj interface{}) {
 	case corev1.PodRunning:
 		// if a pod is start running, we can add it state to the delta graph if it is scheduled by other scheduler
 	case corev1.PodSucceeded:
-		klog.Infof("[Fluence] Pod %s succeeded, Fluence needs to free the resources", newPod.Name)
+		pgMgr.log.Info("[PodGroup UpdatePod] Pod %s succeeded, Fluence needs to free the resources", newPod.Name)
 
 		pgMgr.mutex.Lock()
 		defer pgMgr.mutex.Unlock()
@@ -194,13 +193,13 @@ func (pgMgr *PodGroupManager) UpdatePod(oldObj, newObj interface{}) {
 		if ok {
 			pgMgr.cancelFluxJob(groupName, oldPod)
 		} else {
-			klog.Infof("[Fluence] Succeeded pod %s/%s in group %s doesn't have flux jobid", newPod.Namespace, newPod.Name, groupName)
+			pgMgr.log.Verbose("[PodGroup UpdatePod] Succeeded pod %s/%s in group %s doesn't have flux jobid", newPod.Namespace, newPod.Name, groupName)
 		}
 
 	case corev1.PodFailed:
 
 		// a corner case need to be tested, the pod exit code is not 0, can be created with segmentation fault pi test
-		klog.Warningf("[Fluence] Pod %s in group %s failed, Fluence needs to free the resources", newPod.Name, groupName)
+		pgMgr.log.Warning("[PodGroup UpdatePod] Pod %s in group %s failed, Fluence needs to free the resources", newPod.Name, groupName)
 
 		pgMgr.mutex.Lock()
 		defer pgMgr.mutex.Unlock()
@@ -209,7 +208,7 @@ func (pgMgr *PodGroupManager) UpdatePod(oldObj, newObj interface{}) {
 		if ok {
 			pgMgr.cancelFluxJob(groupName, oldPod)
 		} else {
-			klog.Errorf("[Fluence] Failed pod %s/%s in group %s doesn't have flux jobid", newPod.Namespace, newPod.Name, groupName)
+			pgMgr.log.Error("[PodGroup UpdatePod] Failed pod %s/%s in group %s doesn't have flux jobid", newPod.Namespace, newPod.Name, groupName)
 		}
 	case corev1.PodUnknown:
 		// don't know how to deal with it as it's unknown phase
@@ -220,7 +219,6 @@ func (pgMgr *PodGroupManager) UpdatePod(oldObj, newObj interface{}) {
 
 // DeletePod handles the delete event handler
 func (pgMgr *PodGroupManager) DeletePod(podObj interface{}) {
-	klog.Info("[Fluence] Delete Pod event handler")
 	pod := podObj.(*corev1.Pod)
 	groupName, pg := pgMgr.GetPodGroup(context.TODO(), pod)
 
@@ -230,11 +228,11 @@ func (pgMgr *PodGroupManager) DeletePod(podObj interface{}) {
 		groupName = pg.Name
 	}
 
-	klog.Infof("[Fluence] Delete pod %s in group %s has status %s", pod.Status.Phase, pod.Name, groupName)
+	pgMgr.log.Verbose("[PodGroup DeletePod] Delete pod %s in group %s has status %s", pod.Status.Phase, pod.Name, groupName)
 	switch pod.Status.Phase {
 	case corev1.PodSucceeded:
 	case corev1.PodPending:
-		klog.Infof("[Fluence] Pod %s completed and is Pending termination, Fluence needs to free the resources", pod.Name)
+		pgMgr.log.Verbose("[PodGroup DeletePod] Pod %s completed and is Pending termination, Fluence needs to free the resources", pod.Name)
 
 		pgMgr.mutex.Lock()
 		defer pgMgr.mutex.Unlock()
@@ -243,7 +241,7 @@ func (pgMgr *PodGroupManager) DeletePod(podObj interface{}) {
 		if ok {
 			pgMgr.cancelFluxJob(groupName, pod)
 		} else {
-			klog.Infof("[Fluence] Terminating pod %s/%s in group %s doesn't have flux jobid", pod.Namespace, pod.Name, groupName)
+			pgMgr.log.Info("[PodGroup DeletePod] Terminating pod %s/%s in group %s doesn't have flux jobid", pod.Namespace, pod.Name, groupName)
 		}
 	case corev1.PodRunning:
 		pgMgr.mutex.Lock()
@@ -253,7 +251,7 @@ func (pgMgr *PodGroupManager) DeletePod(podObj interface{}) {
 		if ok {
 			pgMgr.cancelFluxJob(groupName, pod)
 		} else {
-			klog.Infof("[Fluence] Deleted pod %s/%s in group %s doesn't have flux jobid", pod.Namespace, pod.Name, groupName)
+			pgMgr.log.Info("[PodGroup DeletePod] Deleted pod %s/%s in group %s doesn't have flux jobid", pod.Namespace, pod.Name, groupName)
 		}
 	}
 }
