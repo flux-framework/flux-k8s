@@ -8,7 +8,6 @@ Fluence enables HPC-grade pod scheduling in Kubernetes via the [Kubernetes Sched
 
 ## TODO
 
-- On init, need to load in resource graph that accounts for running stuff
 - Need to allow for restart / crashes and looking up existing jobid, updating maps in PodGroup
 - Since AskFlux is done on level of pod group, refactor function to account for specific resources of all pods (not just one pod)
 - Figure out if EventsToRegister replaces old informer

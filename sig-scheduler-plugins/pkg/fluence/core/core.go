@@ -71,7 +71,7 @@ type PodGroupManager struct {
 	scheduleTimeout *time.Duration
 	// permittedPG stores the podgroup name which has passed the pre resource check.
 	permittedPG *gochache.Cache
-	// backedOffPG stores the podgorup name which failed scheudling recently.
+	// backedOffPG stores the podgorup name which failed scheduling recently.
 	backedOffPG *gochache.Cache
 	// podLister is pod lister
 	podLister listerv1.PodLister
@@ -111,12 +111,25 @@ func NewPodGroupManager(
 }
 
 // GetStatuses string (of all pods) to show for debugging purposes
-func (pgMgr *PodGroupManager) GetStatuses(pods []*corev1.Pod) string {
+// Since we loop here, we also determine if the first pod is the one
+// we are considering
+func (pgMgr *PodGroupManager) GetStatusesAndIndex(
+	pods []*corev1.Pod,
+	pod *corev1.Pod,
+) (string, bool, int) {
 	statuses := ""
-	for _, pod := range pods {
-		statuses += " " + fmt.Sprintf("%s", pod.Status.Phase)
+
+	// We need to distinguish 0 from the default and not finding anything
+	foundIndex := false
+	index := 0
+	for i, p := range pods {
+		if p.Name == pod.Name {
+			foundIndex = true
+			index = i
+		}
+		statuses += " " + fmt.Sprintf("%s", p.Status.Phase)
 	}
-	return statuses
+	return statuses, foundIndex, index
 }
 
 // GetPodNode is a quick lookup to see if we have a node
@@ -153,14 +166,28 @@ func (pgMgr *PodGroupManager) PreFilter(
 		return fmt.Errorf("podLister list pods failed: %w", err)
 	}
 
+	// Only allow scheduling the first in the group so the others come after
+
 	// Get statuses to show for debugging
-	statuses := pgMgr.GetStatuses(pods)
+	statuses, found, idx := pgMgr.GetStatusesAndIndex(pods, pod)
 
 	// This shows us the number of pods we have in the set and their states
 	pgMgr.log.Info("[PodGroup PreFilter] group: %s pods: %s MinMember: %d Size: %d", pgFullName, statuses, pg.Spec.MinMember, len(pods))
 	if len(pods) < int(pg.Spec.MinMember) {
 		return fmt.Errorf("pre-filter pod %v cannot find enough sibling pods, "+
 			"current pods number: %v, minMember of group: %v", pod.Name, len(pods), pg.Spec.MinMember)
+	}
+
+	if !found {
+		return fmt.Errorf("pod %s was not found in group - this should not happen", pod.Name)
+	}
+
+	// We only will AskFlux for the first pod
+	// This makes an assumption that the order listed is the order in the queue, I'm not
+	// sure that is true in practice. This is the one case with retry. This design
+	// probably needs thinking and work.
+	if idx != 0 {
+		return fmt.Errorf("pod %s is not first in the list, will wait to schedule", pod.Name)
 	}
 
 	// TODO we likely can take advantage of these resources or other custom

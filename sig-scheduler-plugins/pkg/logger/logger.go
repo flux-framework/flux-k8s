@@ -19,7 +19,6 @@ const (
 	LevelDebug
 )
 
-// TODO try saving state here when we can close
 type DebugLogger struct {
 	level    int
 	Filename string
@@ -28,7 +27,7 @@ type DebugLogger struct {
 
 func NewDebugLogger(level int, filename string) *DebugLogger {
 	return &DebugLogger{
-		level:    LevelNone,
+		level:    level,
 		Filename: filename,
 	}
 }
