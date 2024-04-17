@@ -79,8 +79,8 @@ func (l *DebugLogger) log(level int, prefix string, message ...any) error {
 	rest := message[1:]
 
 	//	msg := fmt.Sprintf(message...)
-	fmt.Printf("Compariing level %d >= %d\n", level, l.level)
-	if level >= l.level {
+	fmt.Printf("Compariing level %d <= %d\n", level, l.level)
+	if level <= l.level {
 		logger.Printf(prolog, rest...)
 	}
 	return l.Stop()
