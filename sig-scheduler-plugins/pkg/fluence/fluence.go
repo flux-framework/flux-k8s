@@ -67,7 +67,8 @@ var (
 
 	_ framework.EnqueueExtensions = &Fluence{}
 
-	permitWaitingTimeSeconds int64 = 60
+	// Set to be the same as coscheduling
+	permitWaitingTimeSeconds int64 = 300
 	podGroupBackoffSeconds   int64 = 0
 )
 
@@ -77,7 +78,7 @@ const (
 )
 
 // Initialize and return a new Fluence Custom Scheduler Plugin
-func New(obj runtime.Object, handle framework.Handle) (framework.Plugin, error) {
+func New(_ context.Context, obj runtime.Object, handle framework.Handle) (framework.Plugin, error) {
 
 	ctx := context.TODO()
 

@@ -2,11 +2,11 @@ FROM fluxrm/flux-sched:jammy
 
 USER root
 ENV DEBIAN_FRONTEND=noninteractive
-ENV GO_VERSION=1.19.10
+ENV GO_VERSION=1.21.9
 
 RUN apt-get update && apt-get clean -y && apt -y autoremove
 
-# Install go 19.10
+# Install go
 RUN wget https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz  && tar -xvf go${GO_VERSION}.linux-amd64.tar.gz && \
     mv go /usr/local && rm go${GO_VERSION}.linux-amd64.tar.gz
 

@@ -293,6 +293,7 @@ func (pgMgr *PodGroupManager) PreFilter(
 	// it may not necessarily pass Filter due to other constraints such as affinity/taints.
 	_, ok := pgMgr.permittedPG.Get(pgFullName)
 	if ok {
+		pgMgr.log.Info("[PodGroup PreFilter] Pod Group %s is already admitted", pgFullName)
 		return nil
 	}
 

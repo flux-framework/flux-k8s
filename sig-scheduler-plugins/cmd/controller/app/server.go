@@ -27,6 +27,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	api "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 	"sigs.k8s.io/scheduler-plugins/pkg/controllers"
 )
@@ -50,9 +51,10 @@ func Run(s *ServerRunOptions) error {
 	// Controller Runtime Controllers
 	ctrl.SetLogger(klogr.New())
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:                  scheme,
-		MetricsBindAddress:      s.MetricsAddr,
-		Port:                    9443,
+		Scheme: scheme,
+		Metrics: metricsserver.Options{
+			BindAddress: s.MetricsAddr,
+		},
 		HealthProbeBindAddress:  s.ProbeAddr,
 		LeaderElection:          s.EnableLeaderElection,
 		LeaderElectionID:        "sched-plugins-controllers",
