@@ -50,9 +50,9 @@ type Fluence struct {
 	mutex            sync.Mutex
 	client           client.Client
 	frameworkHandler framework.Handle
-	pgMgr            fcore.Manager
+	podGroupManager  fcore.Manager
 	scheduleTimeout  *time.Duration
-	pgBackoff        *time.Duration
+	podGroupBackoff  *time.Duration
 	log              *logger.DebugLogger
 }
 
@@ -103,7 +103,7 @@ func New(_ context.Context, obj runtime.Object, handle framework.Handle) (framew
 
 	// PermitWaitingTimeSeconds is the waiting timeout in seconds.
 	scheduleTimeDuration := time.Duration(permitWaitingTimeSeconds) * time.Second
-	pgMgr := fcore.NewPodGroupManager(
+	podGroupManager := fcore.NewPodGroupManager(
 		client,
 		handle.SnapshotSharedLister(),
 		&scheduleTimeDuration,
@@ -112,20 +112,20 @@ func New(_ context.Context, obj runtime.Object, handle framework.Handle) (framew
 		l,
 	)
 
-	// Event handlers to call on pgMgr
+	// Event handlers to call on podGroupManager
 	fluxPodsInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		UpdateFunc: pgMgr.UpdatePod,
-		DeleteFunc: pgMgr.DeletePod,
+		UpdateFunc: podGroupManager.UpdatePod,
+		DeleteFunc: podGroupManager.DeletePod,
 	})
 	go fluxPodsInformer.Run(ctx.Done())
 
 	backoffSeconds := time.Duration(podGroupBackoffSeconds) * time.Second
 	plugin := &Fluence{
 		frameworkHandler: handle,
-		pgMgr:            pgMgr,
+		podGroupManager:  podGroupManager,
 		scheduleTimeout:  &scheduleTimeDuration,
 		log:              l,
-		pgBackoff:        &backoffSeconds,
+		podGroupBackoff:  &backoffSeconds,
 	}
 
 	// TODO this is not supported yet
@@ -144,10 +144,10 @@ func (f *Fluence) EventsToRegister() []framework.ClusterEventWithHint {
 	// TODO I have not redone this yet, not sure what it does (it might replace our informer above)
 	// To register a custom event, follow the naming convention at:
 	// https://git.k8s.io/kubernetes/pkg/scheduler/eventhandlers.go#L403-L410
-	pgGVK := fmt.Sprintf("podgroups.v1alpha1.%v", scheduling.GroupName)
+	podGroupGVK := fmt.Sprintf("podgroups.v1alpha1.%v", scheduling.GroupName)
 	return []framework.ClusterEventWithHint{
 		{Event: framework.ClusterEvent{Resource: framework.Pod, ActionType: framework.Add | framework.Delete}},
-		{Event: framework.ClusterEvent{Resource: framework.GVK(pgGVK), ActionType: framework.Add | framework.Update | framework.Delete}},
+		{Event: framework.ClusterEvent{Resource: framework.GVK(podGroupGVK), ActionType: framework.Add | framework.Update | framework.Delete}},
 	}
 }
 
@@ -193,8 +193,8 @@ func (f *Fluence) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
 	// which is what fluence needs to distinguish between namespaces. Just the
 	// name could be replicated between different namespaces
 	ctx := context.TODO()
-	name1, podGroup1 := f.pgMgr.GetPodGroup(ctx, podInfo1.Pod)
-	name2, podGroup2 := f.pgMgr.GetPodGroup(ctx, podInfo2.Pod)
+	name1, podGroup1 := f.podGroupManager.GetPodGroup(ctx, podInfo1.Pod)
+	name2, podGroup2 := f.podGroupManager.GetPodGroup(ctx, podInfo2.Pod)
 
 	// Fluence can only compare if we have two known groups.
 	// This tries for that first, and falls back to the initial attempt timestamp
@@ -227,7 +227,7 @@ func (f *Fluence) PreFilter(
 
 	// Quick check if the pod is already scheduled
 	f.mutex.Lock()
-	node := f.pgMgr.GetPodNode(pod)
+	node := f.podGroupManager.GetPodNode(pod)
 	f.mutex.Unlock()
 	if node != "" {
 		f.log.Info("[Fluence PreFilter] assigned pod %s to node %s\n", pod.Name, node)
@@ -237,12 +237,12 @@ func (f *Fluence) PreFilter(
 	f.log.Info("[Fluence PreFilter] pod %s does not have a node assigned\n", pod.Name)
 
 	// This will populate the node name into the pod group manager
-	err := f.pgMgr.PreFilter(ctx, pod, state)
+	err := f.podGroupManager.PreFilter(ctx, pod, state)
 	if err != nil {
 		f.log.Error("[Fluence PreFilter] failed pod %s: %s", pod.Name, err.Error())
 		return nil, framework.NewStatus(framework.UnschedulableAndUnresolvable, err.Error())
 	}
-	node = f.pgMgr.GetPodNode(pod)
+	node = f.podGroupManager.GetPodNode(pod)
 	result := framework.PreFilterResult{NodeNames: sets.New(node)}
 	return &result, framework.NewStatus(framework.Success, "")
 }
@@ -255,17 +255,17 @@ func (f *Fluence) PostFilter(
 	filteredNodeStatusMap framework.NodeToStatusMap,
 ) (*framework.PostFilterResult, *framework.Status) {
 
-	pgName, pg := f.pgMgr.GetPodGroup(ctx, pod)
-	if pg == nil {
+	groupName, podGroup := f.podGroupManager.GetPodGroup(ctx, pod)
+	if podGroup == nil {
 		f.log.Info("Pod does not belong to any group, pod %s", pod.Name)
 		return &framework.PostFilterResult{}, framework.NewStatus(framework.Unschedulable, "can not find pod group")
 	}
 
 	// This explicitly checks nodes, and we can skip scheduling another pod if we already
 	// have the minimum. For fluence since we expect an exact size this likely is not needed
-	assigned := f.pgMgr.CalculateAssignedPods(pg.Name, pod.Namespace)
-	if assigned >= int(pg.Spec.MinMember) {
-		f.log.Info("Assigned pods podGroup %s is assigned %s", pgName, assigned)
+	assigned := f.podGroupManager.CalculateAssignedPods(podGroup.Name, pod.Namespace)
+	if assigned >= int(podGroup.Spec.MinMember) {
+		f.log.Info("Assigned pods podGroup %s is assigned %s", groupName, assigned)
 		return &framework.PostFilterResult{}, framework.NewStatus(framework.Unschedulable)
 	}
 
@@ -274,24 +274,24 @@ func (f *Fluence) PostFilter(
 	// It's based on an implicit assumption: if the nth Pod failed,
 	// it's inferrable other Pods belonging to the same PodGroup would be very likely to fail.
 	f.frameworkHandler.IterateOverWaitingPods(func(waitingPod framework.WaitingPod) {
-		if waitingPod.GetPod().Namespace == pod.Namespace && flabel.GetPodGroupLabel(waitingPod.GetPod()) == pg.Name {
-			f.log.Info("PostFilter rejects the pod for podGroup %s and pod %s", pgName, waitingPod.GetPod().Name)
+		if waitingPod.GetPod().Namespace == pod.Namespace && flabel.GetPodGroupLabel(waitingPod.GetPod()) == podGroup.Name {
+			f.log.Info("PostFilter rejects the pod for podGroup %s and pod %s", groupName, waitingPod.GetPod().Name)
 			waitingPod.Reject(f.Name(), "optimistic rejection in PostFilter")
 		}
 	})
 
-	if f.pgBackoff != nil {
+	if f.podGroupBackoff != nil {
 		pods, err := f.frameworkHandler.SharedInformerFactory().Core().V1().Pods().Lister().Pods(pod.Namespace).List(
 			labels.SelectorFromSet(labels.Set{v1alpha1.PodGroupLabel: flabel.GetPodGroupLabel(pod)}),
 		)
-		if err == nil && len(pods) >= int(pg.Spec.MinMember) {
-			f.pgMgr.BackoffPodGroup(pgName, *f.pgBackoff)
+		if err == nil && len(pods) >= int(podGroup.Spec.MinMember) {
+			f.podGroupManager.BackoffPodGroup(groupName, *f.podGroupBackoff)
 		}
 	}
 
-	f.pgMgr.DeletePermittedPodGroup(pgName)
+	f.podGroupManager.DeletePermittedPodGroup(groupName)
 	return &framework.PostFilterResult{}, framework.NewStatus(framework.Unschedulable,
-		fmt.Sprintf("PodGroup %v gets rejected due to Pod %v is unschedulable even after PostFilter", pgName, pod.Name))
+		fmt.Sprintf("PodGroup %v gets rejected due to Pod %v is unschedulable even after PostFilter", groupName, pod.Name))
 }
 
 // Permit is the functions invoked by the framework at "Permit" extension point.
@@ -304,7 +304,7 @@ func (f *Fluence) Permit(
 
 	f.log.Info("Checking permit for pod %s to node %s", pod.Name, nodeName)
 	waitTime := *f.scheduleTimeout
-	s := f.pgMgr.Permit(ctx, state, pod)
+	s := f.podGroupManager.Permit(ctx, state, pod)
 	var retStatus *framework.Status
 	switch s {
 	case fcore.PodGroupNotSpecified:
@@ -315,18 +315,18 @@ func (f *Fluence) Permit(
 		return framework.NewStatus(framework.Unschedulable, "PodGroup not found"), 0
 	case fcore.Wait:
 		f.log.Info("Pod %s is waiting to be scheduled to node %s", pod.Name, nodeName)
-		_, pg := f.pgMgr.GetPodGroup(ctx, pod)
-		if wait := fgroup.GetWaitTimeDuration(pg, f.scheduleTimeout); wait != 0 {
+		_, podGroup := f.podGroupManager.GetPodGroup(ctx, pod)
+		if wait := fgroup.GetWaitTimeDuration(podGroup, f.scheduleTimeout); wait != 0 {
 			waitTime = wait
 		}
 		retStatus = framework.NewStatus(framework.Wait)
 
 		// We will also request to move the sibling pods back to activeQ.
-		f.pgMgr.ActivateSiblings(pod, state)
+		f.podGroupManager.ActivateSiblings(pod, state)
 	case fcore.Success:
-		pgFullName := flabel.GetPodGroupFullName(pod)
+		podGroupFullName := flabel.GetPodGroupFullName(pod)
 		f.frameworkHandler.IterateOverWaitingPods(func(waitingPod framework.WaitingPod) {
-			if flabel.GetPodGroupFullName(waitingPod.GetPod()) == pgFullName {
+			if flabel.GetPodGroupFullName(waitingPod.GetPod()) == podGroupFullName {
 				f.log.Info("Permit allows pod %s", waitingPod.GetPod().Name)
 				waitingPod.Allow(f.Name())
 			}
@@ -346,15 +346,15 @@ func (f *Fluence) Reserve(ctx context.Context, state *framework.CycleState, pod 
 
 // Unreserve rejects all other Pods in the PodGroup when one of the pods in the group times out.
 func (f *Fluence) Unreserve(ctx context.Context, state *framework.CycleState, pod *corev1.Pod, nodeName string) {
-	pgName, pg := f.pgMgr.GetPodGroup(ctx, pod)
-	if pg == nil {
+	groupName, podGroup := f.podGroupManager.GetPodGroup(ctx, pod)
+	if podGroup == nil {
 		return
 	}
 	f.frameworkHandler.IterateOverWaitingPods(func(waitingPod framework.WaitingPod) {
-		if waitingPod.GetPod().Namespace == pod.Namespace && flabel.GetPodGroupLabel(waitingPod.GetPod()) == pg.Name {
-			f.log.Info("Unreserve rejects pod %s in group %s", waitingPod.GetPod().Name, pgName)
+		if waitingPod.GetPod().Namespace == pod.Namespace && flabel.GetPodGroupLabel(waitingPod.GetPod()) == podGroup.Name {
+			f.log.Info("Unreserve rejects pod %s in group %s", waitingPod.GetPod().Name, groupName)
 			waitingPod.Reject(f.Name(), "rejection in Unreserve")
 		}
 	})
-	f.pgMgr.DeletePermittedPodGroup(pgName)
+	f.podGroupManager.DeletePermittedPodGroup(groupName)
 }

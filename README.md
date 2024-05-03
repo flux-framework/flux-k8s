@@ -503,7 +503,7 @@ I was having trouble developing this easily because it's a lot of steps to build
 The last step ensures we use the images we loaded! You can basically just do:
 
 ```bash
-/bin/bash ./hack/quick-build.sh
+/bin/bash ./hack/quick-build-kind.sh
 ```
 
 This sped up my development time immensely. If you want to manually do the steps, see that script for instructions.

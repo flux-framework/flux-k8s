@@ -46,11 +46,11 @@ func GetPodGroupLabel(pod *v1.Pod) string {
 
 // GetPodGroupFullName get namespaced group name from pod labels
 func GetPodGroupFullName(pod *v1.Pod) string {
-	pgName := GetPodGroupLabel(pod)
-	if len(pgName) == 0 {
+	groupName := GetPodGroupLabel(pod)
+	if len(groupName) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%v/%v", pod.Namespace, pgName)
+	return fmt.Sprintf("%v/%v", pod.Namespace, groupName)
 }
 
 // GetPodGroupSize gets the pod group size from the label
