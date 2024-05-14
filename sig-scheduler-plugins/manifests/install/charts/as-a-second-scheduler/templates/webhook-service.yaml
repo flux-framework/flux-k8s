@@ -12,4 +12,4 @@ spec:
   selector:
     app: scheduler-plugins-controller
   ports:
-	{{- .Values.webhookService.ports | toYaml | nindent 2 -}}
+    {{- .Values.webhookService.ports | toYaml | nindent 2 -}}

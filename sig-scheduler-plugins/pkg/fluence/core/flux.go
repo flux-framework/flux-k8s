@@ -69,21 +69,21 @@ func (podGroupManager *PodGroupManager) AskFlux(
 	}
 
 	// An error here is an error with making the request
-	r, err := grpcclient.Match(context.Background(), request)
+	response, err := grpcclient.Match(context.Background(), request)
 	if err != nil {
 		podGroupManager.log.Warning("[PodGroup AskFlux] did not receive any match response: %v\n", err)
 		return nodes, err
 	}
 
 	// TODO GetPodID should be renamed, because it will reflect the group
-	podGroupManager.log.Info("[PodGroup AskFlux] Match response ID %s\n", r.GetPodID())
+	podGroupManager.log.Info("[PodGroup AskFlux] Match response ID %s\n", response.GetPodID())
 
 	// Get the nodelist and inspect
-	nodelist := r.GetNodelist()
+	nodelist := response.GetNodelist()
 	for _, node := range nodelist {
 		nodes = append(nodes, node.NodeID)
 	}
-	jobid := uint64(r.GetJobID())
+	jobid := uint64(response.GetJobID())
 	podGroupManager.log.Info("[PodGroup AskFlux] parsed node pods list %s for job id %d\n", nodes, jobid)
 
 	// TODO would be nice to actually be able to ask flux jobs -a to fluence
@@ -98,10 +98,10 @@ func (podGroupManager *PodGroupManager) AskFlux(
 // We assume that the cancelled job also means deleting the pod group
 func (podGroupManager *PodGroupManager) cancelFluxJob(groupName string, pod *corev1.Pod) error {
 
-	jobid, ok := podGroupManager.groupToJobId[groupName]
+	jobid, exists := podGroupManager.groupToJobId[groupName]
 
 	// The job was already cancelled by another pod
-	if !ok {
+	if !exists {
 		podGroupManager.log.Info("[PodGroup cancelFluxJob] Request for cancel of group %s is already complete.", groupName)
 		return nil
 	}
@@ -121,15 +121,15 @@ func (podGroupManager *PodGroupManager) cancelFluxJob(groupName string, pod *cor
 
 	// This error reflects the success or failure of the cancel request
 	request := &pb.CancelRequest{JobID: int64(jobid)}
-	res, err := grpcclient.Cancel(context.Background(), request)
+	response, err := grpcclient.Cancel(context.Background(), request)
 	if err != nil {
 		podGroupManager.log.Error("[PodGroup cancelFluxJob] did not receive any cancel response: %v", err)
 		return err
 	}
-	podGroupManager.log.Info("[PodGroup cancelFluxJob] Job cancellation for group %s result: %d", groupName, res.Error)
+	podGroupManager.log.Info("[PodGroup cancelFluxJob] Job cancellation for group %s result: %d", groupName, response.Error)
 
 	// And this error is if the cancel was successful or not
-	if res.Error == 0 {
+	if response.Error == 0 {
 		podGroupManager.log.Info("[PodGroup cancelFluxJob] Successful cancel of flux job: %d for group %s", jobid, groupName)
 		podGroupManager.cleanup(pod, groupName)
 	} else {
@@ -189,8 +189,8 @@ func (podGroupManager *PodGroupManager) UpdatePod(oldObj, newObj interface{}) {
 		// Do we have the group id in our cache? If yes, we haven't deleted the jobid yet
 		// I am worried here that if some pods are succeeded and others pending, this could
 		// be a mistake - fluence would schedule it again
-		_, ok := podGroupManager.groupToJobId[groupName]
-		if ok {
+		_, exists := podGroupManager.groupToJobId[groupName]
+		if exists {
 			podGroupManager.cancelFluxJob(groupName, oldPod)
 		} else {
 			podGroupManager.log.Verbose("[PodGroup UpdatePod] Succeeded pod %s/%s in group %s doesn't have flux jobid", newPod.Namespace, newPod.Name, groupName)
@@ -204,8 +204,8 @@ func (podGroupManager *PodGroupManager) UpdatePod(oldObj, newObj interface{}) {
 		podGroupManager.mutex.Lock()
 		defer podGroupManager.mutex.Unlock()
 
-		_, ok := podGroupManager.groupToJobId[groupName]
-		if ok {
+		_, exists := podGroupManager.groupToJobId[groupName]
+		if exists {
 			podGroupManager.cancelFluxJob(groupName, oldPod)
 		} else {
 			podGroupManager.log.Error("[PodGroup UpdatePod] Failed pod %s/%s in group %s doesn't have flux jobid", newPod.Namespace, newPod.Name, groupName)
@@ -237,8 +237,8 @@ func (podGroupManager *PodGroupManager) DeletePod(podObj interface{}) {
 		podGroupManager.mutex.Lock()
 		defer podGroupManager.mutex.Unlock()
 
-		_, ok := podGroupManager.groupToJobId[groupName]
-		if ok {
+		_, exists := podGroupManager.groupToJobId[groupName]
+		if exists {
 			podGroupManager.cancelFluxJob(groupName, pod)
 		} else {
 			podGroupManager.log.Info("[PodGroup DeletePod] Terminating pod %s/%s in group %s doesn't have flux jobid", pod.Namespace, pod.Name, groupName)
@@ -247,8 +247,8 @@ func (podGroupManager *PodGroupManager) DeletePod(podObj interface{}) {
 		podGroupManager.mutex.Lock()
 		defer podGroupManager.mutex.Unlock()
 
-		_, ok := podGroupManager.groupToJobId[groupName]
-		if ok {
+		_, exists := podGroupManager.groupToJobId[groupName]
+		if exists {
 			podGroupManager.cancelFluxJob(groupName, pod)
 		} else {
 			podGroupManager.log.Info("[PodGroup DeletePod] Deleted pod %s/%s in group %s doesn't have flux jobid", pod.Namespace, pod.Name, groupName)

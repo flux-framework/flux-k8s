@@ -4,8 +4,8 @@ INSTALL_PREFIX ?= /usr
 LIB_PREFIX ?= /usr/lib
 LOCALBIN ?= $(shell pwd)/bin
 COMMONENVVAR=GOOS=$(shell uname -s | tr A-Z a-z)
-#BUILDENVVAR=CGO_CFLAGS="-I${FLUX_SCHED_ROOT}/resource/reapi/bindings/c" CGO_LDFLAGS="-L${INSTALL_PREFIX}/lib -L${FLUX_SCHED_ROOT}/resource -lresource -L${FLUX_SCHED_ROOT}/resource/libjobspec -ljobspec_conv -L/${FLUX_SCHED_ROOT}/resource/reapi/bindings -lreapi_cli -lflux-idset -lstdc++ -lczmq -ljansson -lhwloc -lboost_system -lflux-hostlist -lboost_graph -lyaml-cpp"
-BUILDENVVAR=CGO_CFLAGS="-I${FLUX_SCHED_ROOT} -I${FLUX_SCHED_ROOT}/resource/reapi/bindings/c" CGO_LDFLAGS="-L${LIB_PREFIX} -L${LIB_PREFIX}/flux -L${FLUX_SCHED_ROOT}/resource/reapi/bindings -lreapi_cli -lflux-idset -lstdc++ -lczmq -ljansson -lhwloc -lboost_system -lflux-hostlist -lboost_graph -lyaml-cpp"
+#BUILDENVVAR=CGO_CFLAGS="-I${FLUX_SCHED_ROOT}/resource/reapi/bindings/c" CGO_LDFLAGS="-L${INSTALL_PREFIX}/lib -L${FLUX_SCHED_ROOT}/resource -lresource -L${FLUX_SCHED_ROOT}/resource/libjobspec -ljobspec_conv -L/${FLUX_SCHED_ROOT}/resource/reapi/bindings -lreapi_cli -lflux-idset -lstdc++ -ljansson -lhwloc -lboost_system -lflux-hostlist -lboost_graph -lyaml-cpp"
+BUILDENVVAR=CGO_CFLAGS="-I${FLUX_SCHED_ROOT} -I${FLUX_SCHED_ROOT}/resource/reapi/bindings/c" CGO_LDFLAGS="-L${LIB_PREFIX} -L${LIB_PREFIX}/flux -L${FLUX_SCHED_ROOT}/resource/reapi/bindings -lreapi_cli -lflux-idset -lstdc++ -ljansson -lhwloc -lboost_system -lflux-hostlist -lboost_graph -lyaml-cpp"
 
 
 LOCAL_REGISTRY=localhost:5000

@@ -65,10 +65,6 @@ func Run(s *ServerRunOptions) error {
 		return err
 	}
 
-	// Create a channel for the mutating webhook to communicate back to the reconciler
-	// This way we create the PodGroup before scheduling
-	//c := make(chan event.GenericEvent)
-
 	if err = (&controllers.PodGroupReconciler{
 		Client:  mgr.GetClient(),
 		Scheme:  mgr.GetScheme(),

@@ -29,27 +29,27 @@ import (
 // here goes away we cannot remove it from being known. But it's better than
 // not having it, and having fluxion assume more resources than the
 // cluster has available. This is a TODO as fluxion does not support it
-func (f *Fluence) RegisterExisting(ctx context.Context) error {
+func (fluence *Fluence) RegisterExisting(ctx context.Context) error {
 
 	// creates an in-cluster config and client
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		f.log.Error("[Fluence RegisterExisting] Error creating in-cluster config: %s\n", err)
+		fluence.log.Error("[Fluence RegisterExisting] Error creating in-cluster config: %s\n", err)
 		return err
 	}
 	// creates the clientset
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		f.log.Error("[Fluence RegisterExisting] Error creating client for config: %s\n", err)
+		fluence.log.Error("[Fluence RegisterExisting] Error creating client for config: %s\n", err)
 		return err
 	}
 	// get pods in all the namespaces by omitting namespace
 	// Or specify namespace to get pods in particular namespace
 	pods, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
 	if err != nil {
-		f.log.Info("[Fluence RegisterExisting] Error listing pods: %s\n", err)
+		fluence.log.Info("[Fluence RegisterExisting] Error listing pods: %s\n", err)
 		return err
 	}
-	f.log.Info("[Fluence RegisterExisting] Found %d existing pods in the cluster\n", len(pods.Items))
+	fluence.log.Info("[Fluence RegisterExisting] Found %d existing pods in the cluster\n", len(pods.Items))
 	return nil
 }

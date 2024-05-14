@@ -136,12 +136,12 @@ type PodGroup struct {
 type PodGroupSpec struct {
 	// MinMember defines the minimal number of members/tasks to run the pod group;
 	// if there's not enough resources to start all tasks, the scheduler
-	// will not start anyone.
+	// will not start any.
 	MinMember int32 `json:"minMember,omitempty"`
 
 	// MinResources defines the minimal resource of members/tasks to run the pod group;
 	// if there's not enough resources to start all tasks, the scheduler
-	// will not start anyone.
+	// will not start any.
 	MinResources v1.ResourceList `json:"minResources,omitempty"`
 
 	// ScheduleTimeoutSeconds defines the maximal time of members/tasks to wait before run the pod group;
@@ -169,7 +169,13 @@ type PodGroupStatus struct {
 	// +optional
 	Failed int32 `json:"failed,omitempty"`
 
-	// ScheduleStartTime of the group (note that we changed this to a micro time)
+	// CreationTime is intended to mock the object CreationTime,
+	// but set by us to be MicroTime instead of Time.
+	// +optional
+	CreationTime metav1.MicroTime `json:"creationTime,omitempty"`
+
+	// ScheduleStartTime of the group is when we want to start counting
+	// "at time N plus 48 hours, this is when we deem time waited is too long"
 	// +optional
 	ScheduleStartTime metav1.MicroTime `json:"scheduleStartTime,omitempty"`
 }

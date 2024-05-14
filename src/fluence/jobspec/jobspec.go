@@ -18,8 +18,6 @@ package jobspec
 import (
 	"fmt"
 	"log"
-	"math"
-	"os"
 
 	pb "github.com/flux-framework/flux-k8s/flux-plugin/fluence/fluxcli-grpc"
 	"gopkg.in/yaml.v2"
@@ -39,7 +37,7 @@ Ps: &pb.PodSpec{
 */
 
 // CreateJobSpecYaml writes the protobuf jobspec into a yaml file
-func CreateJobSpecYaml(spec *pb.PodSpec, count int32, filename string) error {
+func CreateJobSpecYaml(spec *pb.PodSpec, count int32) ([]byte, error) {
 
 	command := []string{spec.Container}
 	fmt.Println("Labels ", spec.Labels, " ", len(spec.Labels))
@@ -68,38 +66,9 @@ func CreateJobSpecYaml(spec *pb.PodSpec, count int32, filename string) error {
 	yamlbytes, err := yaml.Marshal(&js)
 	if err != nil {
 		log.Fatalf("[JobSpec] yaml.Marshal failed with '%s'\n", err)
-		return err
+		return yamlbytes, err
 	}
-	return writeBytes(yamlbytes, filename)
-}
-
-// WriteBytes writes a byte string to file
-func writeBytes(bytelist []byte, filename string) error {
-	fmt.Printf("[JobSpec] Preparing to write:\n%s\n", string(bytelist))
-	f, err := os.Create(filename)
-	if err != nil {
-		log.Fatalf("[JobSpec] Couldn't create file!!\n")
-		return err
-	}
-	defer f.Close()
-
-	_, err = f.Write(bytelist)
-	if err != nil {
-		log.Fatalf("[JobSpec] Couldn't write file!!\n")
-		return err
-	}
-
-	// Not sure why this is here, but will keep for now
-	_, err = f.WriteString("\n")
-	if err != nil {
-		log.Fatalf("[JobSpec] Couldn't append newline to file!!\n")
-	}
-	return err
-}
-
-func toGB(bytes int64) int64 {
-	res := float64(bytes) / math.Pow(10, 9)
-	return int64(res)
+	return yamlbytes, nil
 }
 
 // createSocketResources creates the socket resources for the JobSpec

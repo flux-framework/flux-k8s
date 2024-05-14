@@ -78,7 +78,7 @@ type Manager interface {
 	PreFilter(context.Context, *corev1.Pod, *framework.CycleState) error
 	GetPodNode(*corev1.Pod) string
 	GetPodGroup(context.Context, *corev1.Pod) (string, *v1alpha1.PodGroup)
-	GetCreationTimestamp(*corev1.Pod, time.Time) time.Time
+	GetCreationTimestamp(*corev1.Pod, time.Time) metav1.MicroTime
 	DeletePermittedPodGroup(string)
 	Permit(context.Context, *framework.CycleState, *corev1.Pod) Status
 	CalculateAssignedPods(string, string) int
@@ -255,8 +255,8 @@ func (podGroupManager *PodGroupManager) PreFilter(
 		return nil
 	}
 
-	_, exist := podGroupManager.backedOffpodGroup.Get(groupName)
-	if exist {
+	_, exists := podGroupManager.backedOffpodGroup.Get(groupName)
+	if exists {
 		return fmt.Errorf("podGroup %v failed recently", groupName)
 	}
 
@@ -290,8 +290,8 @@ func (podGroupManager *PodGroupManager) PreFilter(
 	// TODO(cwdsuzhou): This resource check may not always pre-catch unschedulable pod group.
 	// It only tries to PreFilter resource constraints so even if a PodGroup passed here,
 	// it may not necessarily pass Filter due to other constraints such as affinity/taints.
-	_, ok := podGroupManager.permittedpodGroup.Get(groupName)
-	if ok {
+	_, exists = podGroupManager.permittedpodGroup.Get(groupName)
+	if exists {
 		podGroupManager.log.Info("[PodGroup PreFilter] Pod Group %s is already admitted", groupName)
 		return nil
 	}
@@ -331,17 +331,27 @@ func (podGroupManager *PodGroupManager) PreFilter(
 	return nil
 }
 
-// GetCreationTimestamp returns the creation time of a podGroup or a pod.
-func (podGroupManager *PodGroupManager) GetCreationTimestamp(pod *corev1.Pod, ts time.Time) time.Time {
+// GetCreationTimestamp returns the creation time of a podGroup or a pod in seconds (time.MicroTime)
+// The Status.CreationTime is set by the PodGroup reconciler, which has to happen before we have
+// a PodGroup. I don't see cases when this wouldn't happen, but in case we fall back to
+// converting the pg.CreationTime to a MicroTime
+func (podGroupManager *PodGroupManager) GetCreationTimestamp(pod *corev1.Pod, ts time.Time) metav1.MicroTime {
 	groupName := util.GetPodGroupLabel(pod)
 	if len(groupName) == 0 {
-		return ts
+		return metav1.NewMicroTime(ts)
 	}
 	var podGroup v1alpha1.PodGroup
 	if err := podGroupManager.client.Get(context.TODO(), types.NamespacedName{Namespace: pod.Namespace, Name: groupName}, &podGroup); err != nil {
-		return ts
+		return metav1.NewMicroTime(ts)
 	}
-	return podGroup.CreationTimestamp.Time
+	// First preference goes to microseconds. This should be set, as it is set by the first
+	// reconcile, and we wouldn'thave a pod group if it didn't pass through that.
+	if !podGroup.Status.CreationTime.IsZero() {
+		return podGroup.Status.CreationTime
+	}
+	// Fall back to CreationTime from Kubernetes, in seconds
+	// In practice this should not happen
+	return metav1.NewMicroTime(podGroup.CreationTimestamp.Time)
 }
 
 // CalculateAssignedPods returns the number of pods that has been assigned nodes: assumed or bound.

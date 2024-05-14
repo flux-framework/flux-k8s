@@ -38,12 +38,12 @@ type nodeMetadata struct {
 	Type       string            `json:"type"`
 	Basename   string            `json:"basename"`
 	Name       string            `json:"name"`
-	Id         int               `json:"id"`
-	Uniq_id    int               `json:"uniq_id"`
-	Rank       int               `json:"rank,omitempty"`
+	Id         int64             `json:"id"`
+	Uniq_id    int64             `json:"uniq_id"`
+	Rank       int64             `json:"rank,omitempty"`
 	Exclusive  bool              `json:"exclusive"`
 	Unit       string            `json:"unit"`
-	Size       int               `json:"size"`
+	Size       int64             `json:"size"`
 	Paths      map[string]string `json:"paths,omitempty"`
 	Properties map[string]string `json:"properties,omitempty"`
 }
@@ -57,6 +57,6 @@ type graph struct {
 
 type Fluxjgf struct {
 	Graph    graph           `json:"graph"`
-	Elements int             `json:"-"`
+	Elements int64           `json:"-"`
 	NodeMap  map[string]node `json:"-"`
 }

@@ -48,12 +48,12 @@ func main() {
 	}
 
 	responsechan = make(chan string)
-	s := grpc.NewServer(
+	server := grpc.NewServer(
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			MaxConnectionIdle: 5 * time.Minute,
 		}),
 	)
-	pb.RegisterFluxcliServiceServer(s, &flux)
+	pb.RegisterFluxcliServiceServer(server, &flux)
 
 	// External plugin (Kubectl) GRPC
 	// This will eventually be an external GRPC module that can
@@ -64,11 +64,11 @@ func main() {
 	if *enableServicePlugin {
 		plugin := service.ExternalService{}
 		plugin.Init()
-		svcPb.RegisterExternalPluginServiceServer(s, &plugin)
+		svcPb.RegisterExternalPluginServiceServer(server, &plugin)
 	}
 
 	fmt.Printf("[GRPCServer] gRPC Listening on %s\n", lis.Addr().String())
-	if err := s.Serve(lis); err != nil {
+	if err := server.Serve(lis); err != nil {
 		fmt.Printf("[GRPCServer] failed to serve: %v\n", err)
 	}
 

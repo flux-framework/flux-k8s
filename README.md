@@ -43,7 +43,7 @@ The way it works:
 1. We have a mutating admission webhook that looks for jobs and pods, and ensures there are fluence labels (likely we will add more abstractions).
 2. A PodGroup reconciler is watching for these same objects. When they are created:
   a. We find the labels and create the pod group object.
-  b. The pod group object has a timestamp for creation in milliseconds.
+  b. The pod group object has a timestamp for creation in microseconds.
 3. When the pod is then given to fluence for scheduling, it already has the PodGroup created with name/size and can properly sort.
 
 Here is an example of a Job intended for Fluence:
@@ -452,7 +452,7 @@ If you are looking to develop:
 
  - [src](src): includes source code for fluence. You'll find logs for this code in the `sidecar` container of the fluence pod.
  - [sig-scheduler-plugins](sig-scheduler-plugins): includes assets (manifests and Go files) that are intended to be added to the kubernetes-sigs/scheduler-plugins upstream repository before build. You'll find logs for this container in the `scheduler-plugins-scheduler` container of the pod.
-   - [apis](sig-scheduler-plugins/apis): customized PodGroup to define the status scheduled time in micro seconds
+   - [apis](sig-scheduler-plugins/apis): customized PodGroup to define the status scheduled time in microseconds
    - [manifests](sig-scheduler-plugins/manifests): manifests for helm and Kubernetes
    - [pkg](sig-scheduler-plugins/pkg): the main fluence module to add to upstream
    - [cmd](sig-scheduler-plugins/cmd): the main.go to replace in upstream   

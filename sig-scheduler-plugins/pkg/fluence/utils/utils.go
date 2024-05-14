@@ -44,16 +44,16 @@ func getPodJobspecLabels(pod *v1.Pod) []string {
 // jobspec based on the group and not the individual ID.
 // This calculates across containers in the od
 func PreparePodJobSpec(pod *v1.Pod, groupName string) *pb.PodSpec {
-	ps := new(pb.PodSpec)
-	ps.Id = groupName
+	podSpec := new(pb.PodSpec)
+	podSpec.Id = groupName
 
-	// Note from vsoch - there was an if check here to see if we had labels,
+	// There was an if check here to see if we had labels,
 	// I don't think there is risk to adding an empty list but we can add
 	// the check back if there is
-	ps.Labels = getPodJobspecLabels(pod)
+	podSpec.Labels = getPodJobspecLabels(pod)
 
 	// the jobname should be the group name
-	ps.Container = groupName
+	podSpec.Container = groupName
 
 	// Create accumulated requests for cpu and limits
 	// CPU and memory are summed across containers
@@ -87,12 +87,12 @@ func PreparePodJobSpec(pod *v1.Pod, groupName string) *pb.PodSpec {
 	if cpus == 0 {
 		cpus = 1
 	}
-	ps.Cpu = cpus
-	ps.Gpu = gpus
-	ps.Memory = memory
-	ps.Storage = storage
+	podSpec.Cpu = cpus
+	podSpec.Gpu = gpus
+	podSpec.Memory = memory
+	podSpec.Storage = storage
 
 	// I removed specRequests.Cpu().MilliValue() but we can add back some derivative if desired
-	klog.Infof("[Jobspec] Pod spec: CPU %v, memory %v, GPU %v, storage %v", ps.Cpu, ps.Memory, ps.Gpu, ps.Storage)
-	return ps
+	klog.Infof("[Jobspec] Pod spec: CPU %v, memory %v, GPU %v, storage %v", podSpec.Cpu, podSpec.Memory, podSpec.Gpu, podSpec.Storage)
+	return podSpec
 }

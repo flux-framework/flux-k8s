@@ -1,5 +1,5 @@
 /*
-Copyright 2023 Lawrence Livermore National Security, LLC
+Copyright 2024 Lawrence Livermore National Security, LLC
 
 (c.f. AUTHORS, NOTICE.LLNS, COPYING)
 SPDX-License-Identifier: MIT
@@ -50,14 +50,14 @@ type fluenceWatcher struct {
 // Handle is the main handler for the webhook, which is looking for jobs and pods (in that order)
 // If a job comes in (with a pod template) first, we add the labels there first (and they will
 // not be added again).
-func (a *fluenceWatcher) Handle(ctx context.Context, req admission.Request) admission.Response {
+func (hook *fluenceWatcher) Handle(ctx context.Context, req admission.Request) admission.Response {
 
 	logger.Info("Running webhook handle, determining pod wrapper abstraction...")
 
 	job := &batchv1.Job{}
-	err := a.decoder.Decode(req, job)
+	err := hook.decoder.Decode(req, job)
 	if err == nil {
-		err = a.EnsureGroupOnJob(job)
+		err = hook.EnsureGroupOnJob(job)
 		if err != nil {
 			logger.Error(err, "Issue adding PodGroup to Job")
 			return admission.Errored(http.StatusBadRequest, err)
@@ -72,9 +72,9 @@ func (a *fluenceWatcher) Handle(ctx context.Context, req admission.Request) admi
 	}
 
 	pod := &corev1.Pod{}
-	err = a.decoder.Decode(req, pod)
+	err = hook.decoder.Decode(req, pod)
 	if err == nil {
-		err = a.EnsureGroup(pod)
+		err = hook.EnsureGroup(pod)
 		if err != nil {
 			logger.Error(err, "Issue adding PodGroup to Pod")
 			return admission.Errored(http.StatusBadRequest, err)
@@ -89,9 +89,9 @@ func (a *fluenceWatcher) Handle(ctx context.Context, req admission.Request) admi
 	}
 
 	set := &appsv1.StatefulSet{}
-	err = a.decoder.Decode(req, set)
+	err = hook.decoder.Decode(req, set)
 	if err == nil {
-		err = a.EnsureGroupStatefulSet(set)
+		err = hook.EnsureGroupStatefulSet(set)
 		if err != nil {
 			logger.Error(err, "Issue adding PodGroup to StatefulSet")
 			return admission.Errored(http.StatusBadRequest, err)
@@ -105,15 +105,15 @@ func (a *fluenceWatcher) Handle(ctx context.Context, req admission.Request) admi
 		return admission.PatchResponseFromRaw(req.Object.Raw, marshalledSet)
 	}
 
-	d := &appsv1.Deployment{}
-	err = a.decoder.Decode(req, d)
+	deployment := &appsv1.Deployment{}
+	err = hook.decoder.Decode(req, deployment)
 	if err == nil {
-		err = a.EnsureGroupDeployment(d)
+		err = hook.EnsureGroupDeployment(deployment)
 		if err != nil {
 			logger.Error(err, "Issue adding PodGroup to Deployment")
 			return admission.Errored(http.StatusBadRequest, err)
 		}
-		marshalledD, err := json.Marshal(d)
+		marshalledD, err := json.Marshal(deployment)
 		if err != nil {
 			logger.Error(err, "Marshalling Deployment error")
 			return admission.Errored(http.StatusInternalServerError, err)
@@ -123,9 +123,9 @@ func (a *fluenceWatcher) Handle(ctx context.Context, req admission.Request) admi
 	}
 
 	rset := &appsv1.ReplicaSet{}
-	err = a.decoder.Decode(req, rset)
+	err = hook.decoder.Decode(req, rset)
 	if err == nil {
-		err = a.EnsureGroupReplicaSet(rset)
+		err = hook.EnsureGroupReplicaSet(rset)
 		if err != nil {
 			logger.Error(err, "Issue adding PodGroup to ReplicaSet")
 			return admission.Errored(http.StatusBadRequest, err)
@@ -145,29 +145,28 @@ func (a *fluenceWatcher) Handle(ctx context.Context, req admission.Request) admi
 }
 
 // Default is the expected entrypoint for a webhook...
-// I don't remember if this is even called...
-func (a *fluenceWatcher) Default(ctx context.Context, obj runtime.Object) error {
+func (hook *fluenceWatcher) Default(ctx context.Context, obj runtime.Object) error {
 
 	switch obj.(type) {
 	case *batchv1.Job:
 		job := obj.(*batchv1.Job)
-		return a.EnsureGroupOnJob(job)
+		return hook.EnsureGroupOnJob(job)
 
 	case *corev1.Pod:
 		pod := obj.(*corev1.Pod)
-		return a.EnsureGroup(pod)
+		return hook.EnsureGroup(pod)
 
 	case *appsv1.StatefulSet:
 		set := obj.(*appsv1.StatefulSet)
-		return a.EnsureGroupStatefulSet(set)
+		return hook.EnsureGroupStatefulSet(set)
 
 	case *appsv1.Deployment:
-		d := obj.(*appsv1.Deployment)
-		return a.EnsureGroupDeployment(d)
+		deployment := obj.(*appsv1.Deployment)
+		return hook.EnsureGroupDeployment(deployment)
 
 	case *appsv1.ReplicaSet:
 		set := obj.(*appsv1.ReplicaSet)
-		return a.EnsureGroupReplicaSet(set)
+		return hook.EnsureGroupReplicaSet(set)
 
 	default:
 		// no match
@@ -180,7 +179,7 @@ func (a *fluenceWatcher) Default(ctx context.Context, obj runtime.Object) error 
 // Note that we need to do similar for Job.
 // A pod without a job wrapper, and without metadata is a group
 // of size 1.
-func (a *fluenceWatcher) EnsureGroup(pod *corev1.Pod) error {
+func (hook *fluenceWatcher) EnsureGroup(pod *corev1.Pod) error {
 
 	// Add labels if we don't have anything. Everything is a group!
 	if pod.Labels == nil {
@@ -221,7 +220,7 @@ func getJobLabel(job *batchv1.Job, labelName, defaultLabel string) string {
 
 // EnsureGroupOnJob looks for fluence labels (size and name) on both the job
 // and the pod template. We ultimately put on the pod, the lowest level unit.
-// Since we have the size of the job (paramllism) we can use that for the size
+// Since we have the size of the job (parallelism) we can use that for the size
 func (a *fluenceWatcher) EnsureGroupOnJob(job *batchv1.Job) error {
 
 	// Be forgiving - allow the person to specify it on the job directly or on the Podtemplate
@@ -252,7 +251,7 @@ func (a *fluenceWatcher) EnsureGroupOnJob(job *batchv1.Job) error {
 }
 
 // EnsureGroupStatefulSet creates a PodGroup for a StatefulSet
-func (a *fluenceWatcher) EnsureGroupStatefulSet(set *appsv1.StatefulSet) error {
+func (hook *fluenceWatcher) EnsureGroupStatefulSet(set *appsv1.StatefulSet) error {
 
 	// StatefulSet requires on top level explicitly
 	if set.Labels == nil {

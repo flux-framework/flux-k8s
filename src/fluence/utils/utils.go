@@ -93,23 +93,18 @@ func CreateJGF(filename string, skipLabel *string) error {
 	// Create a Flux Json Graph Format (JGF) with all cluster nodes
 	fluxgraph := jgf.InitJGF()
 
-	// TODO it looks like we can add more to the graph here -
-	// let's remember to consider what else we can.
-	// subnets := make(map[string]string)
-
+	// Top level of the graph is the cluster
+	// This assumes fluxion is only serving one cluster.
+	// previous comments indicate that we choose between the level
+	// of a rack and a subnet. A rack doesn't make sense (the nodes could
+	// be on multiple racks) so subnet is likely the right abstraction
 	cluster := fluxgraph.MakeCluster("k8scluster")
-
-	// Rack needs to be disabled when using subnets
-	// rack := fluxgraph.MakeRack(0)
-
-	// fluxgraph.MakeEdge(cluster, rack, "contains")
-	// fluxgraph.MakeEdge(rack, cluster, "in")
 
 	vcores := 0
 	fmt.Println("Number nodes ", len(nodes.Items))
 	var totalAllocCpu int64
 	totalAllocCpu = 0
-	sdnCount := 0
+	sdnCount := int64(0)
 
 	for nodeIndex, node := range nodes.Items {
 
@@ -146,13 +141,12 @@ func CreateJGF(filename string, skipLabel *string) error {
 			return err
 		}
 
-		// Check if subnet already exists
-		// Here we build subnets according to topology.kubernetes.io/zone label
+		// Here we build the subnet according to topology.kubernetes.io/zone label
 		subnetName := node.Labels["topology.kubernetes.io/zone"]
 		subnet := fluxgraph.MakeSubnet(sdnCount, subnetName)
 		sdnCount = sdnCount + 1
-		fluxgraph.MakeEdge(cluster, subnet, "contains")
-		fluxgraph.MakeEdge(subnet, cluster, "in")
+		fluxgraph.MakeEdge(cluster, subnet, jgf.ContainsRelation)
+		fluxgraph.MakeEdge(subnet, cluster, jgf.InRelation)
 
 		// These are requests for existing pods, for cpu and memory
 		reqs := computeTotalRequests(pods)
@@ -179,64 +173,44 @@ func CreateJGF(filename string, skipLabel *string) error {
 		fmt.Printf("      available mem: %d\n", availMem)
 		gpuAllocatable, hasGpuAllocatable := node.Status.Allocatable["nvidia.com/gpu"]
 
-		// reslist := node.Status.Allocatable
-		// resources := make([]corev1.ResourceName, 0, len(reslist))
-		// for resource := range reslist {
-		// 	fmt.Println("resource ", resource)
-		// 	resources = append(resources, resource)
-		// }
-		// for _, resource := range resources {
-		// 	value := reslist[resource]
-
-		// 	fmt.Printf(" %s:\t%s\n", resource, value.String())
-		// }
+		// TODO possibly look at pod resources vs. node.Status.Allocatable
 
 		workernode := fluxgraph.MakeNode(nodeIndex, false, node.Name)
-		fluxgraph.MakeEdge(subnet, workernode, "contains") // this is rack otherwise
-		fluxgraph.MakeEdge(workernode, subnet, "in")       // this is rack otherwise
-
-		// socket := fluxgraph.MakeSocket(0, "socket")
-		// fluxgraph.MakeEdge(workernode, socket, "contains")
-		// fluxgraph.MakeEdge(socket, workernode, "in")
+		fluxgraph.MakeEdge(subnet, workernode, jgf.ContainsRelation)
+		fluxgraph.MakeEdge(workernode, subnet, jgf.InRelation)
 
 		if hasGpuAllocatable {
 			fmt.Println("GPU Resource quantity ", gpuAllocatable.Value())
-			//MakeGPU(index int, name string, size int) string {
 			for index := 0; index < int(gpuAllocatable.Value()); index++ {
-				gpu := fluxgraph.MakeGPU(index, "nvidiagpu", 1)
-				fluxgraph.MakeEdge(workernode, gpu, "contains") // workernode was socket
-				fluxgraph.MakeEdge(gpu, workernode, "in")
+				gpu := fluxgraph.MakeGPU(int64(index), jgf.NvidiaGPU, 1)
+				fluxgraph.MakeEdge(workernode, gpu, jgf.ContainsRelation)
+				fluxgraph.MakeEdge(gpu, workernode, jgf.InRelation)
 			}
 
 		}
 
 		for index := 0; index < int(availCpu); index++ {
-			// MakeCore(index int, name string)
-			core := fluxgraph.MakeCore(index, "core")
-			fluxgraph.MakeEdge(workernode, core, "contains") // workernode was socket
-			fluxgraph.MakeEdge(core, workernode, "in")
+			core := fluxgraph.MakeCore(int64(index), jgf.CoreType)
+			fluxgraph.MakeEdge(workernode, core, jgf.ContainsRelation)
+			fluxgraph.MakeEdge(core, workernode, jgf.InRelation)
 
 			// Question from Vanessa:
 			// How can we get here and have vcores ever not equal to zero?
 			if vcores == 0 {
-				fluxgraph.MakeNFDProperties(core, index, "cpu-", &node.Labels)
-				// fluxgraph.MakeNFDProperties(core, index, "netmark-", &node.Labels)
+				fluxgraph.MakeNFDProperties(core, int64(index), "cpu-", &node.Labels)
 			} else {
-				for vc := 0; vc < vcores; vc++ {
-					vcore := fluxgraph.MakeVCore(core, vc, "vcore")
-					fluxgraph.MakeNFDProperties(vcore, index, "cpu-", &node.Labels)
+				for virtualCore := 0; virtualCore < vcores; virtualCore++ {
+					vcore := fluxgraph.MakeVCore(core, int64(virtualCore), jgf.VirtualCoreType)
+					fluxgraph.MakeNFDProperties(vcore, int64(index), "cpu-", &node.Labels)
 				}
 			}
 		}
 
-		// MakeMemory(index int, name string, unit string, size int)
 		fractionMem := availMem >> 30
-		// fractionmem := (totalmem/totalcpu) >> 20
-		// fmt.Println("Creating ", fractionmem, " vertices with ", 1<<10, " MB of mem")
-		for i := 0; i < /*int(totalcpu)*/ int(fractionMem); i++ {
-			mem := fluxgraph.MakeMemory(i, "memory", "MB", int(1<<10))
-			fluxgraph.MakeEdge(workernode, mem, "contains")
-			fluxgraph.MakeEdge(mem, workernode, "in")
+		for i := 0; i < int(fractionMem); i++ {
+			mem := fluxgraph.MakeMemory(int64(i), jgf.MemoryType, "MB", 1<<10)
+			fluxgraph.MakeEdge(workernode, mem, jgf.ContainsRelation)
+			fluxgraph.MakeEdge(mem, workernode, jgf.InRelation)
 		}
 	}
 	fmt.Printf("\nCan request at most %d exclusive cpu", totalAllocCpu)
@@ -248,6 +222,7 @@ func CreateJGF(filename string, skipLabel *string) error {
 
 }
 
+// computeTotalRequests sums up the pod requests for the list. We do not consider limits.
 func computeTotalRequests(podList *corev1.PodList) (total map[corev1.ResourceName]resource.Quantity) {
 	total = map[corev1.ResourceName]resource.Quantity{}
 	for _, pod := range podList.Items {
@@ -260,14 +235,6 @@ func computeTotalRequests(podList *corev1.PodList) (total map[corev1.ResourceNam
 				total[podReqName] = v
 			}
 		}
-		// for podLimitName, podLimitValue := range podLimits {
-		// 	if v, ok := total[podLimitName]; !ok {
-		// 		total[podLimitName] = podLimitValue
-		// 	} else {
-		// 		v.Add(podLimitValue)
-		// 		total[podLimitName] = v
-		// 	}
-		// }
 	}
 	return
 }
@@ -295,17 +262,17 @@ func ParseAllocResult(allocated, podName string) []allocation {
 	// Parse graph and nodes into interfaces
 	// TODO look at github.com/mitchellh/mapstructure
 	// that might make this easier
-	nodes := dat["graph"].(interface{})
+	nodes := dat["graph"]
 	str1 := nodes.(map[string]interface{})
 	str2 := str1["nodes"].([]interface{})
 
 	for _, item := range str2 {
 		str1 = item.(map[string]interface{})
 		metadata := str1["metadata"].(map[string]interface{})
-		if metadata["type"].(string) == "core" {
+		if metadata["type"].(string) == jgf.CoreType {
 			corecount = corecount + 1
 		}
-		if metadata["type"].(string) == "node" {
+		if metadata["type"].(string) == jgf.NodeType {
 			result = append(result, allocation{
 				Type:      metadata["type"].(string),
 				Name:      metadata["name"].(string),
@@ -334,6 +301,6 @@ func PrintOutput(reserved bool, allocated string, at int64, overhead float64, jo
 
 	// Only print error if we had one
 	if fluxerr != nil {
-		fmt.Printf("error: %w\n", fluxerr)
+		fmt.Printf("error: %s\n", fluxerr)
 	}
 }

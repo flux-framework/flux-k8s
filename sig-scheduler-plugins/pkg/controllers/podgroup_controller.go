@@ -83,6 +83,7 @@ func (r *PodGroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	log.Info("REFERENCES", "Reconciler", pg.ObjectMeta.OwnerReferences)
 
 	// Grab all statuses (and groups of them) we are interested in
+	// Note that 48 hours seems arbitrary, and if it is, we might make it a variable
 	schedulingOrPending := (pg.Status.Phase == schedv1alpha1.PodGroupScheduling || pg.Status.Phase == schedv1alpha1.PodGroupPending)
 	twoDaysOld := pg.Status.ScheduleStartTime.Sub(pg.CreationTimestamp.Time) > 48*time.Hour
 	finishedOrFailed := pg.Status.Phase == schedv1alpha1.PodGroupFinished || pg.Status.Phase == schedv1alpha1.PodGroupFailed
@@ -111,8 +112,11 @@ func (r *PodGroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
-	// If the scheduler time created is Zero (not set) we set it here
-	if pg.Status.ScheduleStartTime.IsZero() {
+	// If the pod group creation time created is Zero (not set) we set it here
+	// This only happens on the first reconcile, which should also be when the
+	// pod group is created. We set it here and don't use the underlying object
+	// CreationTime because we need to change the granularity to ms.
+	if pg.Status.CreationTime.IsZero() {
 		return r.setTimeCreated(ctx, pg, podList.Items, timestamp)
 	}
 
@@ -159,7 +163,7 @@ func (r *PodGroupReconciler) setTimeCreated(
 
 	// Now patch to update it
 	patch := client.MergeFrom(pg.DeepCopy())
-	pg.Status.ScheduleStartTime = timestamp
+	pg.Status.CreationTime = timestamp
 
 	// Apply the patch to update the size
 	r.Status().Update(ctx, pg)

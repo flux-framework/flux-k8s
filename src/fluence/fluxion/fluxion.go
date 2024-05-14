@@ -20,10 +20,10 @@ type Fluxion struct {
 }
 
 // InitFluxion creates a new client to interaction with the fluxion API (via go bindings)
-func (f *Fluxion) InitFluxion(policy *string, label *string) {
-	f.cli = fluxcli.NewReapiClient()
+func (fluxion *Fluxion) InitFluxion(policy *string, label *string) {
+	fluxion.cli = fluxcli.NewReapiClient()
 
-	klog.Infof("[Fluence] Created flux resource client %s", f.cli)
+	klog.Infof("[Fluence] Created flux resource client %s", fluxion.cli)
 	err := utils.CreateJGF(defaults.KubernetesJsonGraphFormat, label)
 	if err != nil {
 		return
@@ -40,26 +40,25 @@ func (f *Fluxion) InitFluxion(policy *string, label *string) {
 		p = string("{\"matcher_policy\": \"" + *policy + "\"}")
 		klog.Infof("[Fluence] match policy: %s", p)
 	}
-
-	f.cli.InitContext(string(jgf), p)
+	fluxion.cli.InitContext(string(jgf), p)
 }
 
 // Cancel wraps the Cancel function of the fluxion go bindings
-func (s *Fluxion) Cancel(ctx context.Context, in *pb.CancelRequest) (*pb.CancelResponse, error) {
+func (fluxion *Fluxion) Cancel(ctx context.Context, in *pb.CancelRequest) (*pb.CancelResponse, error) {
 
 	klog.Infof("[Fluence] received cancel request %v\n", in)
-	err := s.cli.Cancel(int64(in.JobID), true)
+	err := fluxion.cli.Cancel(int64(in.JobID), true)
 	if err != nil {
-		return nil, errors.New("Error in Cancel")
+		return nil, err
 	}
 
 	// Why would we have an error code here if we check above?
 	// This (I think) should be an error code for the specific job
 	dr := &pb.CancelResponse{JobID: in.JobID}
 	klog.Infof("[Fluence] sending cancel response %v\n", dr)
-	klog.Infof("[Fluence] cancel errors so far: %s\n", s.cli.GetErrMsg())
+	klog.Infof("[Fluence] cancel errors so far: %s\n", fluxion.cli.GetErrMsg())
 
-	reserved, at, overhead, mode, fluxerr := s.cli.Info(int64(in.JobID))
+	reserved, at, overhead, mode, fluxerr := fluxion.cli.Info(int64(in.JobID))
 	klog.Infof("\n\t----Job Info output---")
 	klog.Infof("jobid: %d\nreserved: %t\nat: %d\noverhead: %f\nmode: %s\nerror: %d\n", in.JobID, reserved, at, overhead, mode, fluxerr)
 
@@ -67,48 +66,27 @@ func (s *Fluxion) Cancel(ctx context.Context, in *pb.CancelRequest) (*pb.CancelR
 	return dr, nil
 }
 
-// generateJobSpec generates a jobspec for a match request and returns the string
-func (s *Fluxion) generateJobspec(in *pb.MatchRequest) ([]byte, error) {
-
-	spec := []byte{}
-
-	// Create a temporary file to write and read the jobspec
-	// The first parameter here as the empty string creates in /tmp
-	file, err := os.CreateTemp("", "jobspec.*.yaml")
-	if err != nil {
-		return spec, err
-	}
-	defer os.Remove(file.Name())
-	jobspec.CreateJobSpecYaml(in.Ps, in.Count, file.Name())
-
-	spec, err = os.ReadFile(file.Name())
-	if err != nil {
-		return spec, errors.New("Error reading jobspec")
-	}
-	return spec, err
-}
-
 // Match wraps the MatchAllocate function of the fluxion go bindings
 // If a match is not possible, we return the error and an empty response
-func (s *Fluxion) Match(ctx context.Context, in *pb.MatchRequest) (*pb.MatchResponse, error) {
+func (fluxion *Fluxion) Match(ctx context.Context, in *pb.MatchRequest) (*pb.MatchResponse, error) {
 
 	emptyResponse := &pb.MatchResponse{}
 
 	// Prepare an empty match response (that can still be serialized)
 	klog.Infof("[Fluence] Received Match request %v\n", in)
 
-	// Generate the jobspec, written to temporary file and read as string
-	spec, err := s.generateJobspec(in)
+	// Generate the jobspec, array of bytes converted to string
+	spec, err := jobspec.CreateJobSpecYaml(in.Ps, in.Count)
 	if err != nil {
 		return emptyResponse, err
 	}
 
 	// Ask flux to match allocate!
-	reserved, allocated, at, overhead, jobid, fluxerr := s.cli.MatchAllocate(false, string(spec))
+	reserved, allocated, at, overhead, jobid, fluxerr := fluxion.cli.MatchAllocate(false, string(spec))
 	utils.PrintOutput(reserved, allocated, at, overhead, jobid, fluxerr)
 
 	// Be explicit about errors (or not)
-	errorMessages := s.cli.GetErrMsg()
+	errorMessages := fluxion.cli.GetErrMsg()
 	if errorMessages == "" {
 		klog.Infof("[Fluence] There are no errors")
 	} else {
