@@ -1,3 +1,6 @@
 plugins
 upstream
 scheduler-plugins
+sig-scheduler-plugins/pkg/fluence/bin/
+src/bin
+src/fluence/vendor

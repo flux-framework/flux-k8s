@@ -11,12 +11,19 @@ scheduler:
   policy: lonode
   pullPolicy: Always
   sidecarPullPolicy: Always
+  loggingLevel: "9"
+
+  # Port is for GRPC, and enabling the external service will also
+  # create the service and ingress to it, along with adding
+  # additional API endpoints for our TBA kubectl plugin
+  enableExternalService: false
+  port: 4242
 
 controller:
   name: scheduler-plugins-controller
-  image: registry.k8s.io/scheduler-plugins/controller:v0.27.8
+  image: ghcr.io/flux-framework/fluence-controller:latest
   replicaCount: 1
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
 # LoadVariationRiskBalancing and TargetLoadPacking are not enabled by default
 # as they need extra RBAC privileges on metrics.k8s.io.
@@ -24,16 +31,34 @@ controller:
 plugins:
   enabled: ["Fluence"]
   disabled: ["CapacityScheduling","NodeResourceTopologyMatch","NodeResourcesAllocatable","PrioritySort","Coscheduling"] # only in-tree plugins need to be defined here
+  # Disable EVERYTHING except for fluence
+  # VolumeBinding is required for PreBind, NodeResourcesFit is required or you'll get mismatches
+  # Yes - some of these are irrelevant for the use case here, but I'd rather be super
+  # conservative and be absolutely sure only fluence is running PreFilter to select nodes
+  disabledAll: ["NodePorts", "VolumeRestrictions", "EBSLimits",
+                "GCEPDLimits", "NodeVolumeLimits", "AzureDiskLimits", "VolumeZone", 
+                "PodTopologySpread", "InterPodAffinity", "NodeAffinity",
+                "NodeUnschedulable", "NodeName", "TaintToleration", "DefaultPreemtion",
+                "NodeResourcesBalancedAllocation", "ImageLocality"]
 
 # Customize the enabled plugins' config.
 # Refer to the "pluginConfig" section of manifests/<plugin>/scheduler-config.yaml.
 # For example, for Coscheduling plugin, you want to customize the permit waiting timeout to 10 seconds:
-pluginConfig:
-- name: Coscheduling
-  args:
-    permitWaitingTimeSeconds: 10 # default is 60
+# pluginConfig:
+# - name: Coscheduling
+#  args:
+#    permitWaitingTimeSeconds: 10 # default is 60
 # Or, customize the other plugins
 # - name: NodeResourceTopologyMatch
 #   args:
 #     scoringStrategy:
 #       type: MostAllocated # default is LeastAllocated
+
+enableCertManager: true
+kubernetesClusterDomain: cluster.local
+webhookService:
+  ports:
+  - port: 9443
+    protocol: TCP
+    targetPort: 9443
+  type: ClusterIP

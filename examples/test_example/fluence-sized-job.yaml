@@ -1,0 +1,16 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fluence-sized-job
+spec:
+  parallelism: 3
+  completions: 3
+  template:
+    spec:
+      schedulerName: fluence
+      containers:
+      - name: fluence-job
+        image: busybox
+        command: [sleep, "20"]
+      restartPolicy: Never
+  backoffLimit: 4

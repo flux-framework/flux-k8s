@@ -1,0 +1,19 @@
+apiVersion: flux-framework.org/v1alpha2
+kind: MiniCluster
+metadata:
+  name: lammps2
+spec:
+  size: 2
+  network: 
+    headlessName: l2
+  pod:
+    schedulerName: fluence
+  containers:
+    - image: ghcr.io/converged-computing/metric-lammps:latest@sha256:e24a1ba8954f5a0a7a0bd854cfc5ca7f82ca12607dc6ace38d838591b8deb8ed
+      workingDir: /opt/lammps/examples/reaxff/HNS
+      command: lmp -v x 1 -v y 1 -v z 1 -in in.reaxc.hns -nocite
+      resources:
+        limits:
+          cpu: 10
+        requests:
+          cpu: 10

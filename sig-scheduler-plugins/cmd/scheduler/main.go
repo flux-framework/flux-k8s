@@ -22,21 +22,25 @@ import (
 	"k8s.io/component-base/cli"
 	_ "k8s.io/component-base/metrics/prometheus/clientgo" // for rest client metric registration
 	_ "k8s.io/component-base/metrics/prometheus/version"  // for version metric registration
+
+	// Uncomment here for a local one here we use to debug
+	// This was a clone from kubernetes/kubernetes -> cmd/app
+	//"sigs.k8s.io/scheduler-plugins/cmd/app"
 	"k8s.io/kubernetes/cmd/kube-scheduler/app"
 
 	"sigs.k8s.io/scheduler-plugins/pkg/capacityscheduling"
 	"sigs.k8s.io/scheduler-plugins/pkg/coscheduling"
+	"sigs.k8s.io/scheduler-plugins/pkg/fluence"
 	"sigs.k8s.io/scheduler-plugins/pkg/networkaware/networkoverhead"
 	"sigs.k8s.io/scheduler-plugins/pkg/networkaware/topologicalsort"
-	"sigs.k8s.io/scheduler-plugins/pkg/noderesources"
 	"sigs.k8s.io/scheduler-plugins/pkg/noderesourcetopology"
-	"sigs.k8s.io/scheduler-plugins/pkg/podstate"
 	"sigs.k8s.io/scheduler-plugins/pkg/preemptiontoleration"
-	"sigs.k8s.io/scheduler-plugins/pkg/qos"
 	"sigs.k8s.io/scheduler-plugins/pkg/trimaran/loadvariationriskbalancing"
-	"sigs.k8s.io/scheduler-plugins/pkg/trimaran/lowriskovercommitment"
 	"sigs.k8s.io/scheduler-plugins/pkg/trimaran/targetloadpacking"
-	"sigs.k8s.io/scheduler-plugins/pkg/fluence"
+
+	"sigs.k8s.io/scheduler-plugins/pkg/podstate"
+	"sigs.k8s.io/scheduler-plugins/pkg/qos"
+
 	// Ensure scheme package is initialized.
 	_ "sigs.k8s.io/scheduler-plugins/apis/config/scheme"
 )
@@ -51,13 +55,9 @@ func main() {
 		app.WithPlugin(loadvariationriskbalancing.Name, loadvariationriskbalancing.New),
 		app.WithPlugin(networkoverhead.Name, networkoverhead.New),
 		app.WithPlugin(topologicalsort.Name, topologicalsort.New),
-		app.WithPlugin(noderesources.AllocatableName, noderesources.NewAllocatable),
 		app.WithPlugin(noderesourcetopology.Name, noderesourcetopology.New),
 		app.WithPlugin(preemptiontoleration.Name, preemptiontoleration.New),
 		app.WithPlugin(targetloadpacking.Name, targetloadpacking.New),
-		app.WithPlugin(lowriskovercommitment.Name, lowriskovercommitment.New),
-		// Sample plugins below.
-		// app.WithPlugin(crossnodepreemption.Name, crossnodepreemption.New),
 		app.WithPlugin(podstate.Name, podstate.New),
 		app.WithPlugin(qos.Name, qos.New),
 		app.WithPlugin(fluence.Name, fluence.New),

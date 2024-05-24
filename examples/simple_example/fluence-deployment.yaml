@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example-deployment
+spec:
+  selector:
+    matchLabels:
+      app: example-deployment
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: example-deployment
+    spec:
+      schedulerName: fluence 
+      containers:
+      - name: example
+        image: rockylinux:9
+        command: ["sleep", "infinity"]

@@ -10,24 +10,41 @@ SIDECAR_IMAGE ?= fluence-sidecar:latest
 CONTROLLER_IMAGE ?= fluence-controller
 SCHEDULER_IMAGE ?= fluence
 
-.PHONY: all build build-sidecar prepare push push-sidecar push-controller
+.PHONY: all build build-sidecar clone update push push-sidecar push-controller
 
-all: build-sidecar prepare build
+all: prepare build-sidecar build
 
 build-sidecar: 
 	make -C ./src LOCAL_REGISTRY=${REGISTRY} LOCAL_IMAGE=${SIDECAR_IMAGE}
 
-prepare: 
+clone:
 	if [ -d "$(CLONE_UPSTREAM)" ]; then echo "Upstream is cloned"; else git clone $(UPSTREAM) ./$(CLONE_UPSTREAM); fi
+
+update: clone
+	git -C $(CLONE_UPSTREAM) pull origin master
+
+prepare: clone
 	# These are entirely new directory structures
+	rm -rf $(CLONE_UPSTREAM)/pkg/fluence
+	rm -rf $(CLONE_UPSTREAM)/pkg/logger
+	# rm -rf $(CLONE_UPSTREAM)/cmd/app
+	rm -rf $(CLONE_UPSTREAM)/pkg/controllers/podgroup_controller.go
+	rm -rf $(CLONE_UPSTREAM)/cmd/controller/app/server.go
+	cp -R sig-scheduler-plugins/pkg/logger $(CLONE_UPSTREAM)/pkg/logger
 	cp -R sig-scheduler-plugins/pkg/fluence $(CLONE_UPSTREAM)/pkg/fluence
-	cp -R sig-scheduler-plugins/manifests/fluence $(CLONE_UPSTREAM)/manifests/fluence
+	cp -R sig-scheduler-plugins/pkg/controllers/* $(CLONE_UPSTREAM)/pkg/controllers/
+	# This is the one exception not from sig-scheduler-plugins because it is needed in both spots
+	cp -R src/fluence/fluxcli-grpc $(CLONE_UPSTREAM)/pkg/fluence/fluxcli-grpc
+	# cp -R sig-scheduler-plugins/cmd/app ./upstream/cmd/app
 	# These are files with subtle changes to add fluence
 	cp sig-scheduler-plugins/cmd/scheduler/main.go ./upstream/cmd/scheduler/main.go
-	cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/templates/deployment.yaml $(CLONE_UPSTREAM)/manifests/install/charts/as-a-second-scheduler/templates/deployment.yaml
+	cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/templates/*.yaml $(CLONE_UPSTREAM)/manifests/install/charts/as-a-second-scheduler/templates/
+	cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/crds/*.yaml $(CLONE_UPSTREAM)/manifests/install/charts/as-a-second-scheduler/crds/
 	cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/values.yaml $(CLONE_UPSTREAM)/manifests/install/charts/as-a-second-scheduler/values.yaml
+	cp sig-scheduler-plugins/apis/scheduling/v1alpha1/*.go $(CLONE_UPSTREAM)/apis/scheduling/v1alpha1/
+	cp sig-scheduler-plugins/cmd/controller/app/server.go $(CLONE_UPSTREAM)/cmd/controller/app/server.go
 
-build:
+build: prepare
 	REGISTRY=${REGISTRY} IMAGE=${SCHEDULER_IMAGE} CONTROLLER_IMAGE=${CONTROLLER_IMAGE} $(BASH) $(CLONE_UPSTREAM)/hack/build-images.sh
 
 push-sidecar:
