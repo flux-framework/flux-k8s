@@ -55,7 +55,7 @@ type graph struct {
 	Directed bool `json:"directed,omitempty"`
 }
 
-type Fluxjgf struct {
+type FluxJGF struct {
 	Graph    graph           `json:"graph"`
 	Elements int64           `json:"-"`
 	NodeMap  map[string]node `json:"-"`

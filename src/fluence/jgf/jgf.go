@@ -53,9 +53,9 @@ var (
 )
 
 // InitJGF initializes the Flux Json Graph Format object
-func InitJGF() (fluxgraph Fluxjgf) {
+func InitJGF() (fluxgraph FluxJGF) {
 	var g graph
-	fluxgraph = Fluxjgf{
+	fluxgraph = FluxJGF{
 		Graph:    g,
 		Elements: 0,
 		NodeMap:  make(map[string]node),
@@ -71,14 +71,14 @@ func getDefaultPaths() map[string]string {
 }
 
 // addNode adds a node to the JGF
-func (g *Fluxjgf) addNode(toadd node) {
+func (g *FluxJGF) addNode(toadd node) {
 	g.Graph.Nodes = append(g.Graph.Nodes, toadd)
 	g.NodeMap[toadd.Id] = toadd
 	g.Elements = g.Elements + 1
 }
 
 // MakeEdge creates an edge for the JGF
-func (g *Fluxjgf) MakeEdge(source string, target string, contains string) {
+func (g *FluxJGF) MakeEdge(source string, target string, contains string) {
 	newedge := edge{
 		Source: source,
 		Target: target,
@@ -94,7 +94,7 @@ func (g *Fluxjgf) MakeEdge(source string, target string, contains string) {
 }
 
 // MakeSubnet creates a subnet for the graph
-func (g *Fluxjgf) MakeSubnet(index int64, ip string) string {
+func (g *FluxJGF) MakeSubnet(index int64, ip string) string {
 	newnode := node{
 		Id: fmt.Sprintf("%d", g.Elements),
 		Metadata: nodeMetadata{
@@ -115,7 +115,7 @@ func (g *Fluxjgf) MakeSubnet(index int64, ip string) string {
 }
 
 // MakeNode creates a new node for the graph
-func (g *Fluxjgf) MakeNode(index int, exclusive bool, subnet string) string {
+func (g *FluxJGF) MakeNode(index int, exclusive bool, subnet string) string {
 	newnode := node{
 		Id: fmt.Sprintf("%d", g.Elements),
 		Metadata: nodeMetadata{
@@ -136,7 +136,7 @@ func (g *Fluxjgf) MakeNode(index int, exclusive bool, subnet string) string {
 }
 
 // MakeSocket creates a socket for the graph
-func (g *Fluxjgf) MakeSocket(index int64, name string) string {
+func (g *FluxJGF) MakeSocket(index int64, name string) string {
 	newnode := node{
 		Id: fmt.Sprintf("%d", g.Elements),
 		Metadata: nodeMetadata{
@@ -157,7 +157,7 @@ func (g *Fluxjgf) MakeSocket(index int64, name string) string {
 }
 
 // MakeCore creates a core for the graph
-func (g *Fluxjgf) MakeCore(index int64, name string) string {
+func (g *FluxJGF) MakeCore(index int64, name string) string {
 	newnode := node{
 		Id: fmt.Sprintf("%d", g.Elements),
 		Metadata: nodeMetadata{
@@ -178,7 +178,7 @@ func (g *Fluxjgf) MakeCore(index int64, name string) string {
 }
 
 // MakeVCore makes a vcore (I think 2 vcpu == 1 cpu) for the graph
-func (g *Fluxjgf) MakeVCore(coreid string, index int64, name string) string {
+func (g *FluxJGF) MakeVCore(coreid string, index int64, name string) string {
 	newnode := node{
 		Id: fmt.Sprintf("%d", g.Elements),
 		Metadata: nodeMetadata{
@@ -201,7 +201,7 @@ func (g *Fluxjgf) MakeVCore(coreid string, index int64, name string) string {
 }
 
 // MakeNFProperties makes the node feature discovery properties for the graph
-func (g *Fluxjgf) MakeNFDProperties(coreid string, index int64, filter string, labels *map[string]string) {
+func (g *FluxJGF) MakeNFDProperties(coreid string, index int64, filter string, labels *map[string]string) {
 	for key, _ := range *labels {
 		if strings.Contains(key, filter) {
 			name := strings.Split(key, "/")[1]
@@ -230,7 +230,7 @@ func (g *Fluxjgf) MakeNFDProperties(coreid string, index int64, filter string, l
 	}
 }
 
-func (g *Fluxjgf) MakeNFDPropertiesByValue(coreid string, index int64, filter string, labels *map[string]string) {
+func (g *FluxJGF) MakeNFDPropertiesByValue(coreid string, index int64, filter string, labels *map[string]string) {
 	for key, val := range *labels {
 		if strings.Contains(key, filter) {
 			name := val
@@ -257,7 +257,7 @@ func (g *Fluxjgf) MakeNFDPropertiesByValue(coreid string, index int64, filter st
 }
 
 // MakeMemory creates memory for the graph
-func (g *Fluxjgf) MakeMemory(index int64, name string, unit string, size int64) string {
+func (g *FluxJGF) MakeMemory(index int64, name string, unit string, size int64) string {
 	newnode := node{
 		Id: fmt.Sprintf("%d", g.Elements),
 		Metadata: nodeMetadata{
@@ -278,7 +278,7 @@ func (g *Fluxjgf) MakeMemory(index int64, name string, unit string, size int64) 
 }
 
 // MakeGPU makes a gpu for the graph
-func (g *Fluxjgf) MakeGPU(index int64, name string, size int64) string {
+func (g *FluxJGF) MakeGPU(index int64, name string, size int64) string {
 	newnode := node{
 		Id: fmt.Sprintf("%d", g.Elements),
 		Metadata: nodeMetadata{
@@ -299,7 +299,7 @@ func (g *Fluxjgf) MakeGPU(index int64, name string, size int64) string {
 }
 
 // MakeCluster creates the cluster
-func (g *Fluxjgf) MakeCluster(clustername string) string {
+func (g *FluxJGF) MakeCluster(clustername string) string {
 	g.Elements = 0
 	newnode := node{
 		Id: strconv.Itoa(0),
@@ -323,7 +323,7 @@ func (g *Fluxjgf) MakeCluster(clustername string) string {
 }
 
 // MakeRack makes the rack
-func (g *Fluxjgf) MakeRack(index int64) string {
+func (g *FluxJGF) MakeRack(index int64) string {
 	newnode := node{
 		Id: fmt.Sprintf("%d", g.Elements),
 		Metadata: nodeMetadata{
@@ -343,7 +343,7 @@ func (g *Fluxjgf) MakeRack(index int64) string {
 	return newnode.Id
 }
 
-func (g *Fluxjgf) WriteJGF(path string) error {
+func (g *FluxJGF) WriteJGF(path string) error {
 
 	encodedJGF, err := json.MarshalIndent(g, "", "  ")
 
