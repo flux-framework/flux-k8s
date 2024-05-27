@@ -19,7 +19,8 @@ import (
 )
 
 var (
-	controlPlaneLabel = "node-role.kubernetes.io/control-plane"
+	controlPlaneLabel  = "node-role.kubernetes.io/control-plane"
+	defaultClusterName = "k8scluster"
 )
 
 // RegisterExisting uses the in cluster API to get existing pods
@@ -91,14 +92,14 @@ func CreateJGF(filename string, skipLabel *string) error {
 	}
 
 	// Create a Flux Json Graph Format (JGF) with all cluster nodes
-	fluxgraph := jgf.InitJGF()
+	fluxgraph := jgf.NewFluxJGF()
 
 	// Top level of the graph is the cluster
 	// This assumes fluxion is only serving one cluster.
 	// previous comments indicate that we choose between the level
 	// of a rack and a subnet. A rack doesn't make sense (the nodes could
 	// be on multiple racks) so subnet is likely the right abstraction
-	cluster := fluxgraph.MakeCluster("k8scluster")
+	cluster := fluxgraph.MakeCluster(defaultClusterName)
 
 	vcores := 0
 	fmt.Println("Number nodes ", len(nodes.Items))

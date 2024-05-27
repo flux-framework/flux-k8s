@@ -52,15 +52,13 @@ var (
 	containmentKey = "containment"
 )
 
-// InitJGF initializes the Flux Json Graph Format object
-func InitJGF() (fluxgraph FluxJGF) {
-	var g graph
-	fluxgraph = FluxJGF{
-		Graph:    g,
+// NewFluxJGF creates and returns a new Flux Json Graph Format object
+func NewFluxJGF() FluxJGF {
+	return FluxJGF{
+		Graph:    graph{},
 		Elements: 0,
 		NodeMap:  make(map[string]node),
 	}
-	return
 }
 
 // getDefaultPaths returns a new map with empty containment
