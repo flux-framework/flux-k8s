@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strconv"
 	"strings"
 )
 
@@ -54,25 +53,47 @@ var (
 
 // NewFluxJGF creates and returns a new Flux Json Graph Format object
 func NewFluxJGF() FluxJGF {
+
+	// Create a new cluster, and count the top level as a resource
+	// The index 0 (of the element count) is the cluster
+	counters := map[string]int64{"cluster": int64(1)}
 	return FluxJGF{
-		Graph:    graph{},
-		Elements: 0,
-		NodeMap:  make(map[string]node),
+		Graph:   graph{},
+		NodeMap: make(map[string]Node),
+
+		// Counters and lookup for resources
+		Resources: ResourceCounter{counts: counters},
 	}
 }
 
-// getDefaultPaths returns a new map with empty containment
-// this cannot be a global shared variable or we get an error
-// about inserting an edge to itself.
-func getDefaultPaths() map[string]string {
-	return map[string]string{containmentKey: ""}
+// ToJson returns a Json string of the graph
+func (g *FluxJGF) ToJson() (string, error) {
+	toprint, err := json.MarshalIndent(g.Graph, "", "\t")
+	return string(toprint), err
 }
 
-// addNode adds a node to the JGF
-func (g *FluxJGF) addNode(toadd node) {
-	g.Graph.Nodes = append(g.Graph.Nodes, toadd)
-	g.NodeMap[toadd.Id] = toadd
-	g.Elements = g.Elements + 1
+// GetNodePath returns the node containment path
+func getNodePath(root, subpath string) string {
+	var path string
+	if subpath == "" {
+		path = fmt.Sprintf("/%s", root)
+	} else {
+		path = fmt.Sprintf("/%s/%s", root, subpath)
+	}
+	// Hack to allow for imperfection of slash placement
+	path = strings.ReplaceAll(path, "//", "/")
+	return path
+}
+
+// getContainmentPath returns a new map with containment metadata
+func (g *FluxJGF) getContainmentPath(subpath string) map[string]string {
+	return map[string]string{containmentKey: getNodePath(g.Resources.RootName, subpath)}
+}
+
+// MakeBidirectionalEdge makes an edge for a parent and child
+func (g *FluxJGF) MakeBidirectionalEdge(parent, child string) {
+	g.MakeEdge(parent, child, ContainsRelation)
+	g.MakeEdge(child, parent, InRelation)
 }
 
 // MakeEdge creates an edge for the JGF
@@ -85,260 +106,125 @@ func (g *FluxJGF) MakeEdge(source string, target string, contains string) {
 		},
 	}
 	g.Graph.Edges = append(g.Graph.Edges, newedge)
-	if contains == ContainsRelation {
-		tnode := g.NodeMap[target]
-		tnode.Metadata.Paths[containmentKey] = g.NodeMap[source].Metadata.Paths[containmentKey] + "/" + tnode.Metadata.Name
-	}
 }
 
 // MakeSubnet creates a subnet for the graph
-func (g *FluxJGF) MakeSubnet(index int64, ip string) string {
-	newnode := node{
-		Id: fmt.Sprintf("%d", g.Elements),
+// The name is typically the ip address
+func (g *FluxJGF) MakeSubnet(name string) Node {
+
+	// Get a resource counter for the subnet
+	resource := g.Resources.getCounter(name, SubnetType)
+	subpath := resource.NameWithIndex()
+	return g.makeNewNode(resource, subpath, defaultUnit, defaultSize)
+}
+
+// makeNewNode is a shared function to make a new node from a resource spec
+// subpath is the subpath to add to the graph root, e.g., <cluster>/<subpath>
+// Since there is some variability to this structure, it is assembled by
+// the calling function
+func (g *FluxJGF) makeNewNode(
+	resource ResourceCount,
+	subpath, unit string,
+	size int64,
+) Node {
+
+	// A subnet comes directly under the cluster, which is the parent
+	newNode := Node{
+
+		// Global identifier in graph, as a string
+		Id: resource.StringElementId(),
 		Metadata: nodeMetadata{
-			Type:      SubnetType,
-			Basename:  ip,
-			Name:      ip + fmt.Sprintf("%d", g.Elements),
-			Id:        index,
-			Uniq_id:   g.Elements,
-			Rank:      defaultRank,
-			Exclusive: defaultExclusive,
-			Unit:      defaultUnit,
-			Size:      defaultSize,
-			Paths:     getDefaultPaths(),
-		},
-	}
-	g.addNode(newnode)
-	return newnode.Id
-}
+			Type: resource.Type,
 
-// MakeNode creates a new node for the graph
-func (g *FluxJGF) MakeNode(index int, exclusive bool, subnet string) string {
-	newnode := node{
-		Id: fmt.Sprintf("%d", g.Elements),
-		Metadata: nodeMetadata{
-			Type:      NodeType,
-			Basename:  subnet,
-			Name:      subnet + fmt.Sprintf("%d", g.Elements),
-			Id:        g.Elements,
-			Uniq_id:   g.Elements,
-			Rank:      defaultRank,
-			Exclusive: exclusive,
-			Unit:      defaultUnit,
-			Size:      defaultSize,
-			Paths:     getDefaultPaths(),
-		},
-	}
-	g.addNode(newnode)
-	return newnode.Id
-}
+			// The original name without an index
+			Basename: resource.Name,
 
-// MakeSocket creates a socket for the graph
-func (g *FluxJGF) MakeSocket(index int64, name string) string {
-	newnode := node{
-		Id: fmt.Sprintf("%d", g.Elements),
-		Metadata: nodeMetadata{
-			Type:      SocketType,
-			Basename:  name,
-			Name:      name + fmt.Sprintf("%d", index),
-			Id:        index,
-			Uniq_id:   g.Elements,
-			Rank:      defaultRank,
-			Exclusive: defaultExclusive,
-			Unit:      defaultUnit,
-			Size:      defaultSize,
-			Paths:     getDefaultPaths(),
-		},
-	}
-	g.addNode(newnode)
-	return newnode.Id
-}
+			// The name with an index
+			Name: resource.NameWithIndex(),
 
-// MakeCore creates a core for the graph
-func (g *FluxJGF) MakeCore(index int64, name string) string {
-	newnode := node{
-		Id: fmt.Sprintf("%d", g.Elements),
-		Metadata: nodeMetadata{
-			Type:      CoreType,
-			Basename:  name,
-			Name:      name + fmt.Sprintf("%d", index),
-			Id:        index,
-			Uniq_id:   g.Elements,
-			Rank:      defaultRank,
-			Exclusive: defaultExclusive,
-			Unit:      defaultUnit,
-			Size:      defaultSize,
-			Paths:     getDefaultPaths(),
-		},
-	}
-	g.addNode(newnode)
-	return newnode.Id
-}
+			// Integer resource index
+			Id: resource.Index,
 
-// MakeVCore makes a vcore (I think 2 vcpu == 1 cpu) for the graph
-func (g *FluxJGF) MakeVCore(coreid string, index int64, name string) string {
-	newnode := node{
-		Id: fmt.Sprintf("%d", g.Elements),
-		Metadata: nodeMetadata{
-			Type:      VirtualCoreType,
-			Basename:  name,
-			Name:      name + fmt.Sprintf("%d", index),
-			Id:        index,
-			Uniq_id:   g.Elements,
-			Rank:      defaultRank,
-			Exclusive: defaultExclusive,
-			Unit:      defaultUnit,
-			Size:      defaultSize,
-			Paths:     getDefaultPaths(),
-		},
-	}
-	g.addNode(newnode)
-	g.MakeEdge(coreid, newnode.Id, ContainsRelation)
-	g.MakeEdge(newnode.Id, coreid, InRelation)
-	return newnode.Id
-}
-
-// MakeNFProperties makes the node feature discovery properties for the graph
-func (g *FluxJGF) MakeNFDProperties(coreid string, index int64, filter string, labels *map[string]string) {
-	for key, _ := range *labels {
-		if strings.Contains(key, filter) {
-			name := strings.Split(key, "/")[1]
-			if strings.Contains(name, ".") {
-				name = strings.Split(name, ".")[1]
-			}
-
-			newnode := node{
-				Id: fmt.Sprintf("%d", g.Elements),
-				Metadata: nodeMetadata{
-					Type:      name,
-					Basename:  name,
-					Name:      name + fmt.Sprintf("%d", index),
-					Id:        index,
-					Uniq_id:   g.Elements,
-					Rank:      defaultRank,
-					Exclusive: defaultExclusive,
-					Unit:      defaultUnit,
-					Size:      defaultSize,
-					Paths:     getDefaultPaths(),
-				},
-			}
-			g.addNode(newnode)
-			g.MakeEdge(coreid, newnode.Id, ContainsRelation)
-		}
-	}
-}
-
-func (g *FluxJGF) MakeNFDPropertiesByValue(coreid string, index int64, filter string, labels *map[string]string) {
-	for key, val := range *labels {
-		if strings.Contains(key, filter) {
-			name := val
-
-			newnode := node{
-				Id: fmt.Sprintf("%d", g.Elements),
-				Metadata: nodeMetadata{
-					Type:      name,
-					Basename:  name,
-					Name:      name + fmt.Sprintf("%d", index),
-					Id:        index,
-					Uniq_id:   g.Elements,
-					Rank:      defaultRank,
-					Exclusive: defaultExclusive,
-					Unit:      defaultUnit,
-					Size:      defaultSize,
-					Paths:     getDefaultPaths(),
-				},
-			}
-			g.addNode(newnode)
-			g.MakeEdge(coreid, newnode.Id, ContainsRelation)
-		}
-	}
-}
-
-// MakeMemory creates memory for the graph
-func (g *FluxJGF) MakeMemory(index int64, name string, unit string, size int64) string {
-	newnode := node{
-		Id: fmt.Sprintf("%d", g.Elements),
-		Metadata: nodeMetadata{
-			Type:      MemoryType,
-			Basename:  name,
-			Name:      name + fmt.Sprintf("%d", index),
-			Id:        index,
-			Uniq_id:   g.Elements,
+			// Integer global element index
+			Uniq_id:   resource.ElementId,
 			Rank:      defaultRank,
 			Exclusive: defaultExclusive,
 			Unit:      unit,
 			Size:      size,
-			Paths:     getDefaultPaths(),
+
+			// subnet is one above root graph, so just need it's name
+			Paths: g.getContainmentPath(subpath),
 		},
 	}
-	g.addNode(newnode)
-	return newnode.Id
+
+	// Add the new node to the graph
+	g.Graph.Nodes = append(g.Graph.Nodes, newNode)
+	g.NodeMap[newNode.Id] = newNode
+	return newNode
+}
+
+// MakeNode creates a new node for the graph
+func (g *FluxJGF) MakeNode(name, subpath string) Node {
+
+	// Get a resource counter for the node, which is under the subnet
+	resource := g.Resources.getCounter(name, NodeType)
+
+	// Here the full containment path will be:
+	// <cluster-root>/<subnet>/<node>
+	subpath = fmt.Sprintf("%s/%s", subpath, resource.NameWithIndex())
+	return g.makeNewNode(resource, subpath, defaultUnit, defaultSize)
+}
+
+// MakeCore creates a core for the graph
+func (g *FluxJGF) MakeCore(name, subpath string) Node {
+
+	// A core is located at the subnet->node->core
+	resource := g.Resources.getCounter(name, CoreType)
+
+	// Here the full containment path will be:
+	// <cluster-root>/<subnet>/<node>/<core>
+	subpath = fmt.Sprintf("%s/%s", subpath, resource.NameWithIndex())
+	return g.makeNewNode(resource, subpath, defaultUnit, defaultSize)
+}
+
+// MakeMemory creates memory for the graph
+// Flux doesn't understand memory? Not sure if this is doing anything
+func (g *FluxJGF) MakeMemory(name, subpath string, size int64) Node {
+
+	// unit is assumed to be MB
+	unit := "MB"
+
+	// A core is located at the subnet->node->core
+	resource := g.Resources.getCounter(name, MemoryType)
+
+	// Here the full containment path will be:
+	// <cluster-root>/<subnet>/<node>/<memory>
+	subpath = fmt.Sprintf("%s/%s", subpath, resource.NameWithIndex())
+	return g.makeNewNode(resource, subpath, unit, size)
 }
 
 // MakeGPU makes a gpu for the graph
-func (g *FluxJGF) MakeGPU(index int64, name string, size int64) string {
-	newnode := node{
-		Id: fmt.Sprintf("%d", g.Elements),
-		Metadata: nodeMetadata{
-			Type:      GPUType,
-			Basename:  name,
-			Name:      name + fmt.Sprintf("%d", index),
-			Id:        index,
-			Uniq_id:   g.Elements,
-			Rank:      defaultRank,
-			Exclusive: defaultExclusive,
-			Unit:      defaultUnit,
-			Size:      size,
-			Paths:     getDefaultPaths(),
-		},
-	}
-	g.addNode(newnode)
-	return newnode.Id
+func (g *FluxJGF) MakeGPU(name, subpath string, size int64) Node {
+
+	// Get a resource counter for the gpu, which is under the subnet->node->gpu
+	resource := g.Resources.getCounter(name, GPUType)
+
+	// Here the full containment path will be:
+	// <cluster-root>/<subnet>/<node>
+	subpath = fmt.Sprintf("%s/%s", subpath, resource.NameWithIndex())
+	return g.makeNewNode(resource, subpath, defaultUnit, size)
 }
 
-// MakeCluster creates the cluster
-func (g *FluxJGF) MakeCluster(clustername string) string {
-	g.Elements = 0
-	newnode := node{
-		Id: strconv.Itoa(0),
-		Metadata: nodeMetadata{
-			Type:      ClusterType,
-			Basename:  clustername,
-			Name:      clustername + "0",
-			Id:        g.Elements,
-			Uniq_id:   0,
-			Rank:      defaultRank,
-			Exclusive: defaultExclusive,
-			Unit:      defaultUnit,
-			Size:      defaultSize,
-			Paths: map[string]string{
-				containmentKey: "/" + clustername + "0",
-			},
-		},
+// InitCluster creates a new cluster, primarily the root "cluster" node
+func (g *FluxJGF) InitCluster(name string) (Node, error) {
+	if g.Resources.Elements > 0 {
+		return Node{}, fmt.Errorf("init can only be called for a new cluster")
 	}
-	g.addNode(newnode)
-	return newnode.Id
-}
 
-// MakeRack makes the rack
-func (g *FluxJGF) MakeRack(index int64) string {
-	newnode := node{
-		Id: fmt.Sprintf("%d", g.Elements),
-		Metadata: nodeMetadata{
-			Type:      RackType,
-			Basename:  RackType,
-			Name:      RackType + fmt.Sprintf("%d", index),
-			Id:        index,
-			Uniq_id:   g.Elements,
-			Rank:      defaultRank,
-			Exclusive: defaultExclusive,
-			Unit:      defaultUnit,
-			Size:      defaultSize,
-			Paths:     getDefaultPaths(),
-		},
-	}
-	g.addNode(newnode)
-	return newnode.Id
+	// The cluster name is the index (always 0) with the original name
+	g.Resources.RootName = fmt.Sprintf("%s0", name)
+	resource := g.Resources.getCounter(name, ClusterType)
+	return g.makeNewNode(resource, "", defaultUnit, defaultSize), nil
 }
 
 func (g *FluxJGF) WriteJGF(path string) error {
