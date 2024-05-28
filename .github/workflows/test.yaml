@@ -1,0 +1,19 @@
+name: fluence testing
+
+on:
+  pull_request: []
+
+jobs:
+  test-fluence:
+    runs-on: ubuntu-latest
+    name: build fluence
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v4
+      with:
+        go-version: ^1.21
+
+    - name: Run Tests
+      run: |
+        cd src/fluence
+        make test
