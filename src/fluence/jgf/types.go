@@ -131,7 +131,10 @@ func (r *ResourceCounter) NextResourceIndex(resourceType string) int64 {
 }
 
 // getCounter returns the counter context for a specific resource type
-func (r *ResourceCounter) getCounter(resourceName string, resourceType string) ResourceCount {
+func (r *ResourceCounter) getCounter(
+	resourceName string,
+	resourceType string,
+) ResourceCount {
 	resourceCount := ResourceCount{
 		Index:     r.NextResourceIndex(resourceName),
 		Type:      resourceType,

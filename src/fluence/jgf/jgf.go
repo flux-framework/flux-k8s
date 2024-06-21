@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
+	filepath "path"
 )
 
 var (
@@ -80,9 +80,7 @@ func getNodePath(root, subpath string) string {
 	} else {
 		path = fmt.Sprintf("/%s/%s", root, subpath)
 	}
-	// Hack to allow for imperfection of slash placement
-	path = strings.ReplaceAll(path, "//", "/")
-	return path
+	return filepath.Clean(path)
 }
 
 // getContainmentPath returns a new map with containment metadata
@@ -110,10 +108,11 @@ func (g *FluxJGF) MakeEdge(source string, target string, contains string) {
 
 // MakeSubnet creates a subnet for the graph
 // The name is typically the ip address
-func (g *FluxJGF) MakeSubnet(name string) Node {
+func (g *FluxJGF) MakeSubnet(name string, index int64) Node {
 
 	// Get a resource counter for the subnet
 	resource := g.Resources.getCounter(name, SubnetType)
+	resource.Index = index
 	subpath := resource.NameWithIndex()
 	return g.makeNewNode(resource, subpath, defaultUnit, defaultSize)
 }
@@ -125,8 +124,7 @@ func (g *FluxJGF) MakeSubnet(name string) Node {
 func (g *FluxJGF) makeNewNode(
 	resource ResourceCount,
 	subpath, unit string,
-	size int64,
-) Node {
+	size int64) Node {
 
 	// A subnet comes directly under the cluster, which is the parent
 	newNode := Node{
@@ -164,10 +162,11 @@ func (g *FluxJGF) makeNewNode(
 }
 
 // MakeNode creates a new node for the graph
-func (g *FluxJGF) MakeNode(name, subpath string) Node {
+func (g *FluxJGF) MakeNode(name, subpath string, index int64) Node {
 
 	// Get a resource counter for the node, which is under the subnet
 	resource := g.Resources.getCounter(name, NodeType)
+	resource.Index = index
 
 	// Here the full containment path will be:
 	// <cluster-root>/<subnet>/<node>
@@ -176,10 +175,11 @@ func (g *FluxJGF) MakeNode(name, subpath string) Node {
 }
 
 // MakeCore creates a core for the graph
-func (g *FluxJGF) MakeCore(name, subpath string) Node {
+func (g *FluxJGF) MakeCore(name, subpath string, index int64) Node {
 
 	// A core is located at the subnet->node->core
 	resource := g.Resources.getCounter(name, CoreType)
+	resource.Index = index
 
 	// Here the full containment path will be:
 	// <cluster-root>/<subnet>/<node>/<core>
@@ -189,13 +189,16 @@ func (g *FluxJGF) MakeCore(name, subpath string) Node {
 
 // MakeMemory creates memory for the graph
 // Flux doesn't understand memory? Not sure if this is doing anything
-func (g *FluxJGF) MakeMemory(name, subpath string, size int64) Node {
+func (g *FluxJGF) MakeMemory(
+	name, subpath string,
+	size, index int64) Node {
 
 	// unit is assumed to be MB
 	unit := "MB"
 
 	// A core is located at the subnet->node->core
 	resource := g.Resources.getCounter(name, MemoryType)
+	resource.Index = index
 
 	// Here the full containment path will be:
 	// <cluster-root>/<subnet>/<node>/<memory>
@@ -204,10 +207,11 @@ func (g *FluxJGF) MakeMemory(name, subpath string, size int64) Node {
 }
 
 // MakeGPU makes a gpu for the graph
-func (g *FluxJGF) MakeGPU(name, subpath string, size int64) Node {
+func (g *FluxJGF) MakeGPU(name, subpath string, size, index int64) Node {
 
 	// Get a resource counter for the gpu, which is under the subnet->node->gpu
 	resource := g.Resources.getCounter(name, GPUType)
+	resource.Index = index
 
 	// Here the full containment path will be:
 	// <cluster-root>/<subnet>/<node>

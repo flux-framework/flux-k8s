@@ -114,8 +114,9 @@ func CreateInClusterJGF(filename string, skipLabel string) error {
 	// Keep a lookup of subnet nodes in case we see one twice
 	// We don't want to create a new entity for it in the graph
 	subnetLookup := map[string]jgf.Node{}
+	var subnetCounter int64 = 0
 
-	for _, node := range nodes.Items {
+	for nodeCount, node := range nodes.Items {
 
 		// We should not be scheduling to the control plane
 		_, ok := node.Labels[controlPlaneLabel]
@@ -155,7 +156,8 @@ func CreateInClusterJGF(filename string, skipLabel string) error {
 		subnetNode, exists := subnetLookup[subnetName]
 		if !exists {
 			// Build the subnet according to topology.kubernetes.io/zone label
-			subnetNode = fluxgraph.MakeSubnet(subnetName)
+			subnetNode = fluxgraph.MakeSubnet(subnetName, subnetCounter)
+			subnetCounter += 1
 
 			// This is one example of bidirectional, I won't document in
 			// all following occurrences but this is what the function does
@@ -192,7 +194,7 @@ func CreateInClusterJGF(filename string, skipLabel string) error {
 		// TODO possibly look at pod resources vs. node.Status.Allocatable
 		// Make the compute node, which is a child of the subnet
 		// The parameters here are the node name, and the parent path
-		computeNode := fluxgraph.MakeNode(node.Name, subnetNode.Metadata.Name)
+		computeNode := fluxgraph.MakeNode(node.Name, subnetNode.Metadata.Name, int64(nodeCount))
 
 		// [subnet] -> contains -> [compute node]
 		fluxgraph.MakeBidirectionalEdge(subnetNode.Id, computeNode.Id)
@@ -206,7 +208,7 @@ func CreateInClusterJGF(filename string, skipLabel string) error {
 				subpath := fmt.Sprintf("%s/%s", subnetNode.Metadata.Name, computeNode.Metadata.Name)
 
 				// TODO: can this size be greater than 1?
-				gpuNode := fluxgraph.MakeGPU(jgf.NvidiaGPU, subpath, 1)
+				gpuNode := fluxgraph.MakeGPU(jgf.NvidiaGPU, subpath, 1, int64(index))
 
 				// [compute] -> contains -> [gpu]
 				fluxgraph.MakeBidirectionalEdge(computeNode.Id, gpuNode.Id)
@@ -217,7 +219,7 @@ func CreateInClusterJGF(filename string, skipLabel string) error {
 		// Here is where we are adding cores
 		for index := 0; index < int(availCpu); index++ {
 			subpath := fmt.Sprintf("%s/%s", subnetNode.Metadata.Name, computeNode.Metadata.Name)
-			coreNode := fluxgraph.MakeCore(jgf.CoreType, subpath)
+			coreNode := fluxgraph.MakeCore(jgf.CoreType, subpath, int64(index))
 			fluxgraph.MakeBidirectionalEdge(computeNode.Id, coreNode.Id)
 		}
 
@@ -225,7 +227,7 @@ func CreateInClusterJGF(filename string, skipLabel string) error {
 		fractionMem := availMem >> 30
 		for i := 0; i < int(fractionMem); i++ {
 			subpath := fmt.Sprintf("%s/%s", subnetNode.Metadata.Name, computeNode.Metadata.Name)
-			memoryNode := fluxgraph.MakeMemory(jgf.MemoryType, subpath, 1<<10)
+			memoryNode := fluxgraph.MakeMemory(jgf.MemoryType, subpath, 1<<10, int64(i))
 			fluxgraph.MakeBidirectionalEdge(computeNode.Id, memoryNode.Id)
 		}
 	}

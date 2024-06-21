@@ -32,8 +32,8 @@ func TestNewFluxJGF(t *testing.T) {
 	fmt.Println(out)
 
 	// Add subnets to it
-	subnetNodeA := fluxgraph.MakeSubnet("east")
-	subnetNodeB := fluxgraph.MakeSubnet("west")
+	subnetNodeA := fluxgraph.MakeSubnet("east", 0)
+	subnetNodeB := fluxgraph.MakeSubnet("west", 1)
 	fluxgraph.MakeBidirectionalEdge(clusterNode.Id, subnetNodeA.Id)
 	fluxgraph.MakeBidirectionalEdge(clusterNode.Id, subnetNodeB.Id)
 
@@ -44,8 +44,8 @@ func TestNewFluxJGF(t *testing.T) {
 	fmt.Println(out)
 
 	// Add some nodes!
-	computeNodeA := fluxgraph.MakeNode("node", subnetNodeA.Metadata.Name)
-	computeNodeB := fluxgraph.MakeNode("node", subnetNodeB.Metadata.Name)
+	computeNodeA := fluxgraph.MakeNode("node", subnetNodeA.Metadata.Name, 0)
+	computeNodeB := fluxgraph.MakeNode("node", subnetNodeB.Metadata.Name, 1)
 	fluxgraph.MakeBidirectionalEdge(subnetNodeA.Id, computeNodeA.Id)
 	fluxgraph.MakeBidirectionalEdge(subnetNodeB.Id, computeNodeB.Id)
 
@@ -57,15 +57,15 @@ func TestNewFluxJGF(t *testing.T) {
 
 	// Add a GPU to one, and cores to the other
 	subpath := fmt.Sprintf("%s/%s", subnetNodeA.Metadata.Name, computeNodeA.Metadata.Name)
-	gpuNodeA := fluxgraph.MakeGPU(NvidiaGPU, subpath, 1)
+	gpuNodeA := fluxgraph.MakeGPU(NvidiaGPU, subpath, 1, 0)
 	fluxgraph.MakeBidirectionalEdge(computeNodeA.Id, gpuNodeA.Id)
 
 	subpath = fmt.Sprintf("%s/%s", subnetNodeB.Metadata.Name, computeNodeB.Metadata.Name)
-	coreNode := fluxgraph.MakeCore(CoreType, subpath)
+	coreNode := fluxgraph.MakeCore(CoreType, subpath, 0)
 	fluxgraph.MakeBidirectionalEdge(computeNodeB.Id, coreNode.Id)
 
 	// Finally, add some memory to the second compute node
-	memoryNode := fluxgraph.MakeMemory(MemoryType, subpath, 1<<10)
+	memoryNode := fluxgraph.MakeMemory(MemoryType, subpath, 1<<10, 0)
 	fluxgraph.MakeBidirectionalEdge(computeNodeA.Id, memoryNode.Id)
 
 	out, err = fluxgraph.ToJson()
