@@ -19,7 +19,8 @@ import (
 )
 
 var (
-	controlPlaneLabel = "node-role.kubernetes.io/control-plane"
+	controlPlaneLabel  = "node-role.kubernetes.io/control-plane"
+	defaultClusterName = "k8scluster"
 )
 
 // RegisterExisting uses the in cluster API to get existing pods
@@ -67,12 +68,12 @@ func RegisterExisting(clientset *kubernetes.Clientset, ctx context.Context) (map
 	return nodes, nil
 }
 
-// CreateJGF creates the Json Graph Format
+// CreateInClusterJGF creates the Json Graph Format from the Kubernetes API
 // We currently don't have support in fluxion to allocate jobs for existing pods,
 // so instead we create the graph with fewer resources. When that support is
 // added (see sig-scheduler-plugins/pkg/fluence/register.go) we can
 // remove the adjustment here, which is more of a hack
-func CreateJGF(filename string, skipLabel *string) error {
+func CreateInClusterJGF(filename string, skipLabel string) error {
 	ctx := context.Background()
 	config, err := rest.InClusterConfig()
 	if err != nil {
@@ -91,22 +92,31 @@ func CreateJGF(filename string, skipLabel *string) error {
 	}
 
 	// Create a Flux Json Graph Format (JGF) with all cluster nodes
-	fluxgraph := jgf.InitJGF()
+	fluxgraph := jgf.NewFluxJGF()
 
-	// Top level of the graph is the cluster
+	// Initialize the cluster. The top level of the graph is the cluster
 	// This assumes fluxion is only serving one cluster.
 	// previous comments indicate that we choose between the level
 	// of a rack and a subnet. A rack doesn't make sense (the nodes could
 	// be on multiple racks) so subnet is likely the right abstraction
-	cluster := fluxgraph.MakeCluster("k8scluster")
-
-	vcores := 0
+	clusterNode, err := fluxgraph.InitCluster(defaultClusterName)
+	if err != nil {
+		return err
+	}
 	fmt.Println("Number nodes ", len(nodes.Items))
+
+	// TODO for follow up / next PR:
+	// Metrics / summary should be an attribute of the JGF outer flux graph
+	// Resources should come in from entire group (and not repres. pod)
 	var totalAllocCpu int64
 	totalAllocCpu = 0
-	sdnCount := int64(0)
 
-	for nodeIndex, node := range nodes.Items {
+	// Keep a lookup of subnet nodes in case we see one twice
+	// We don't want to create a new entity for it in the graph
+	subnetLookup := map[string]jgf.Node{}
+	var subnetCounter int64 = 0
+
+	for nodeCount, node := range nodes.Items {
 
 		// We should not be scheduling to the control plane
 		_, ok := node.Labels[controlPlaneLabel]
@@ -117,8 +127,8 @@ func CreateJGF(filename string, skipLabel *string) error {
 
 		// Anything labeled with "skipLabel" meaning it is present,
 		// should be skipped
-		if *skipLabel != "" {
-			_, ok := node.Labels[*skipLabel]
+		if skipLabel != "" {
+			_, ok := node.Labels[skipLabel]
 			if ok {
 				fmt.Printf("Skipping node %s\n", node.GetName())
 				continue
@@ -141,12 +151,20 @@ func CreateJGF(filename string, skipLabel *string) error {
 			return err
 		}
 
-		// Here we build the subnet according to topology.kubernetes.io/zone label
+		// Have we seen this subnet node before?
 		subnetName := node.Labels["topology.kubernetes.io/zone"]
-		subnet := fluxgraph.MakeSubnet(sdnCount, subnetName)
-		sdnCount = sdnCount + 1
-		fluxgraph.MakeEdge(cluster, subnet, jgf.ContainsRelation)
-		fluxgraph.MakeEdge(subnet, cluster, jgf.InRelation)
+		subnetNode, exists := subnetLookup[subnetName]
+		if !exists {
+			// Build the subnet according to topology.kubernetes.io/zone label
+			subnetNode = fluxgraph.MakeSubnet(subnetName, subnetCounter)
+			subnetCounter += 1
+
+			// This is one example of bidirectional, I won't document in
+			// all following occurrences but this is what the function does
+			// [cluster] -> contains -> [subnet]
+			// [subnet]  ->       in -> [cluster]
+			fluxgraph.MakeBidirectionalEdge(clusterNode.Id, subnetNode.Id)
+		}
 
 		// These are requests for existing pods, for cpu and memory
 		reqs := computeTotalRequests(pods)
@@ -174,43 +192,43 @@ func CreateJGF(filename string, skipLabel *string) error {
 		gpuAllocatable, hasGpuAllocatable := node.Status.Allocatable["nvidia.com/gpu"]
 
 		// TODO possibly look at pod resources vs. node.Status.Allocatable
+		// Make the compute node, which is a child of the subnet
+		// The parameters here are the node name, and the parent path
+		computeNode := fluxgraph.MakeNode(node.Name, subnetNode.Metadata.Name, int64(nodeCount))
 
-		workernode := fluxgraph.MakeNode(nodeIndex, false, node.Name)
-		fluxgraph.MakeEdge(subnet, workernode, jgf.ContainsRelation)
-		fluxgraph.MakeEdge(workernode, subnet, jgf.InRelation)
+		// [subnet] -> contains -> [compute node]
+		fluxgraph.MakeBidirectionalEdge(subnetNode.Id, computeNode.Id)
 
+		// Here we are adding GPU resources under nodes
 		if hasGpuAllocatable {
 			fmt.Println("GPU Resource quantity ", gpuAllocatable.Value())
 			for index := 0; index < int(gpuAllocatable.Value()); index++ {
-				gpu := fluxgraph.MakeGPU(int64(index), jgf.NvidiaGPU, 1)
-				fluxgraph.MakeEdge(workernode, gpu, jgf.ContainsRelation)
-				fluxgraph.MakeEdge(gpu, workernode, jgf.InRelation)
+
+				// The subpath (from and not including root) is the subnet -> node
+				subpath := fmt.Sprintf("%s/%s", subnetNode.Metadata.Name, computeNode.Metadata.Name)
+
+				// TODO: can this size be greater than 1?
+				gpuNode := fluxgraph.MakeGPU(jgf.NvidiaGPU, subpath, 1, int64(index))
+
+				// [compute] -> contains -> [gpu]
+				fluxgraph.MakeBidirectionalEdge(computeNode.Id, gpuNode.Id)
 			}
 
 		}
 
+		// Here is where we are adding cores
 		for index := 0; index < int(availCpu); index++ {
-			core := fluxgraph.MakeCore(int64(index), jgf.CoreType)
-			fluxgraph.MakeEdge(workernode, core, jgf.ContainsRelation)
-			fluxgraph.MakeEdge(core, workernode, jgf.InRelation)
-
-			// Question from Vanessa:
-			// How can we get here and have vcores ever not equal to zero?
-			if vcores == 0 {
-				fluxgraph.MakeNFDProperties(core, int64(index), "cpu-", &node.Labels)
-			} else {
-				for virtualCore := 0; virtualCore < vcores; virtualCore++ {
-					vcore := fluxgraph.MakeVCore(core, int64(virtualCore), jgf.VirtualCoreType)
-					fluxgraph.MakeNFDProperties(vcore, int64(index), "cpu-", &node.Labels)
-				}
-			}
+			subpath := fmt.Sprintf("%s/%s", subnetNode.Metadata.Name, computeNode.Metadata.Name)
+			coreNode := fluxgraph.MakeCore(jgf.CoreType, subpath, int64(index))
+			fluxgraph.MakeBidirectionalEdge(computeNode.Id, coreNode.Id)
 		}
 
+		// Here is where we are adding memory
 		fractionMem := availMem >> 30
 		for i := 0; i < int(fractionMem); i++ {
-			mem := fluxgraph.MakeMemory(int64(i), jgf.MemoryType, "MB", 1<<10)
-			fluxgraph.MakeEdge(workernode, mem, jgf.ContainsRelation)
-			fluxgraph.MakeEdge(mem, workernode, jgf.InRelation)
+			subpath := fmt.Sprintf("%s/%s", subnetNode.Metadata.Name, computeNode.Metadata.Name)
+			memoryNode := fluxgraph.MakeMemory(jgf.MemoryType, subpath, 1<<10, int64(i))
+			fluxgraph.MakeBidirectionalEdge(computeNode.Id, memoryNode.Id)
 		}
 	}
 	fmt.Printf("\nCan request at most %d exclusive cpu", totalAllocCpu)
@@ -219,7 +237,6 @@ func CreateJGF(filename string, skipLabel *string) error {
 		return err
 	}
 	return nil
-
 }
 
 // computeTotalRequests sums up the pod requests for the list. We do not consider limits.

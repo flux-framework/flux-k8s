@@ -40,7 +40,7 @@ func main() {
 
 	// Fluxion GRPC
 	flux := fluxion.Fluxion{}
-	flux.InitFluxion(policy, label)
+	flux.InitFluxion(*policy, *label)
 
 	lis, err := net.Listen("tcp", port)
 	if err != nil {

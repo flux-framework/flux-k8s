@@ -20,11 +20,11 @@ type Fluxion struct {
 }
 
 // InitFluxion creates a new client to interaction with the fluxion API (via go bindings)
-func (fluxion *Fluxion) InitFluxion(policy *string, label *string) {
+func (fluxion *Fluxion) InitFluxion(policy string, label string) {
 	fluxion.cli = fluxcli.NewReapiClient()
 
 	klog.Infof("[Fluence] Created flux resource client %s", fluxion.cli)
-	err := utils.CreateJGF(defaults.KubernetesJsonGraphFormat, label)
+	err := utils.CreateInClusterJGF(defaults.KubernetesJsonGraphFormat, label)
 	if err != nil {
 		return
 	}
@@ -36,8 +36,8 @@ func (fluxion *Fluxion) InitFluxion(policy *string, label *string) {
 	}
 
 	p := "{}"
-	if *policy != "" {
-		p = string("{\"matcher_policy\": \"" + *policy + "\"}")
+	if policy != "" {
+		p = string("{\"matcher_policy\": \"" + policy + "\"}")
 		klog.Infof("[Fluence] match policy: %s", p)
 	}
 	fluxion.cli.InitContext(string(jgf), p)
