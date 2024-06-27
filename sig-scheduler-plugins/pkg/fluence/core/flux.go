@@ -10,7 +10,7 @@ import (
 	fgroup "sigs.k8s.io/scheduler-plugins/pkg/fluence/group"
 
 	"sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
-	"sigs.k8s.io/scheduler-plugins/pkg/fluence/utils"
+	"sigs.k8s.io/scheduler-plugins/pkg/fluence/podspec"
 
 	corev1 "k8s.io/api/core/v1"
 )
@@ -47,7 +47,7 @@ func (podGroupManager *PodGroupManager) AskFlux(
 	// IMPORTANT: this is a JobSpec for *one* pod, assuming they are all the same.
 	// This obviously may not be true if we have a hetereogenous PodGroup.
 	// We name it based on the group, since it will represent the group
-	jobspec := utils.PreparePodJobSpec(&pod, groupName)
+	jobspec := podspec.PreparePodJobSpec(&pod, groupName)
 	podGroupManager.log.Info("[PodGroup AskFlux] Inspect pod info, jobspec: %s\n", jobspec)
 	conn, err := grpc.Dial("127.0.0.1:4242", grpc.WithInsecure())
 
