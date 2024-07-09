@@ -25,8 +25,8 @@ import (
 
 	// Uncomment here for a local one here we use to debug
 	// This was a clone from kubernetes/kubernetes -> cmd/app
-	//"sigs.k8s.io/scheduler-plugins/cmd/app"
-	"k8s.io/kubernetes/cmd/kube-scheduler/app"
+	"sigs.k8s.io/scheduler-plugins/cmd/app"
+	//"k8s.io/kubernetes/cmd/kube-scheduler/app"
 
 	"sigs.k8s.io/scheduler-plugins/pkg/capacityscheduling"
 	"sigs.k8s.io/scheduler-plugins/pkg/coscheduling"

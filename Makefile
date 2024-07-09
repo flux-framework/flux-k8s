@@ -1,56 +1,48 @@
-CLONE_UPSTREAM ?= ./upstream
-UPSTREAM ?= https://github.com/kubernetes-sigs/scheduler-plugins
+# Local Directory for upstreams
+UPSTREAMS ?= ./upstreams
+
+# Local repository directories
+UPSTREAM_K8S ?= $(UPSTREAMS)/kubernetes
+
+# Remote repositories
+UPSTREAM_K8S_REPO ?= https://github.com/kubernetes/kubernetes
+
 BASH ?= /bin/bash
 DOCKER ?= docker
 TAG ?= latest
+ARCH ?= amd64
 
 # These are passed to build the sidecar
 REGISTRY ?= ghcr.io/flux-framework
 SIDECAR_IMAGE ?= fluence-sidecar:latest
-CONTROLLER_IMAGE ?= fluence-controller
 SCHEDULER_IMAGE ?= fluence
 
-.PHONY: all build build-sidecar clone update push push-sidecar push-controller
+.PHONY: all build build-sidecar clone update push push-sidecar
 
 all: prepare build-sidecar build
 
-build-sidecar: 
-	make -C ./src LOCAL_REGISTRY=${REGISTRY} LOCAL_IMAGE=${SIDECAR_IMAGE}
+upstreams: 
+	mkdir -p $(UPSTREAMS)
 
-clone:
-	if [ -d "$(CLONE_UPSTREAM)" ]; then echo "Upstream is cloned"; else git clone $(UPSTREAM) ./$(CLONE_UPSTREAM); fi
+clone-k8s: upstreams
+	if [ -d "$(UPSTREAM_K8S)" ]; then echo "Kubernetes upstream is cloned"; else ./hack/clone-k8s.sh $(UPSTREAM_K8S_REPO) $(UPSTREAM_K8S); fi
 
-update: clone
-	git -C $(CLONE_UPSTREAM) pull origin master
+prepare: clone clone-k8s
+	# Add fluence as a new in-tree plugin
+	rm -rf $(UPSTREAM_K8S)/pkg/scheduler/framework/plugins/fluence
 
-prepare: clone
-	# These are entirely new directory structures
-	rm -rf $(CLONE_UPSTREAM)/pkg/fluence
-	rm -rf $(CLONE_UPSTREAM)/pkg/logger
-	# rm -rf $(CLONE_UPSTREAM)/cmd/app
-	rm -rf $(CLONE_UPSTREAM)/pkg/controllers/podgroup_controller.go
-	rm -rf $(CLONE_UPSTREAM)/cmd/controller/app/server.go
-	cp -R sig-scheduler-plugins/pkg/logger $(CLONE_UPSTREAM)/pkg/logger
-	cp -R sig-scheduler-plugins/pkg/fluence $(CLONE_UPSTREAM)/pkg/fluence
-	cp -R sig-scheduler-plugins/pkg/controllers/* $(CLONE_UPSTREAM)/pkg/controllers/
-	# This is the one exception not from sig-scheduler-plugins because it is needed in both spots
-	cp -R src/fluence/fluxcli-grpc $(CLONE_UPSTREAM)/pkg/fluence/fluxcli-grpc
-	# cp -R sig-scheduler-plugins/cmd/app ./upstream/cmd/app
-	# These are files with subtle changes to add fluence
-	cp sig-scheduler-plugins/cmd/scheduler/main.go ./upstream/cmd/scheduler/main.go
-	cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/templates/*.yaml $(CLONE_UPSTREAM)/manifests/install/charts/as-a-second-scheduler/templates/
-	cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/crds/*.yaml $(CLONE_UPSTREAM)/manifests/install/charts/as-a-second-scheduler/crds/
-	cp sig-scheduler-plugins/manifests/install/charts/as-a-second-scheduler/values.yaml $(CLONE_UPSTREAM)/manifests/install/charts/as-a-second-scheduler/values.yaml
-	cp sig-scheduler-plugins/apis/scheduling/v1alpha1/*.go $(CLONE_UPSTREAM)/apis/scheduling/v1alpha1/
-	cp sig-scheduler-plugins/cmd/controller/app/server.go $(CLONE_UPSTREAM)/cmd/controller/app/server.go
+	cp kubernetes/cmd/kube-scheduler/scheduler.go $(UPSTREAM_K8S)/cmd/kube-scheduler/scheduler.go
+	cp kubernetes/pkg/scheduler/*.go $(UPSTREAM_K8S)/pkg/scheduler/
+	cp -R kubernetes/pkg/fluence $(UPSTREAM_K8S)/pkg/scheduler/framework/plugins/fluence
+	cp -R src/fluence/fluxcli-grpc $(UPSTREAM_K8S)/pkg/scheduler/framework/plugins/fluence/fluxcli-grpc
 
 build: prepare
-	REGISTRY=${REGISTRY} IMAGE=${SCHEDULER_IMAGE} CONTROLLER_IMAGE=${CONTROLLER_IMAGE} $(BASH) $(CLONE_UPSTREAM)/hack/build-images.sh
+	docker build -t ${REGISTRY}/${SCHEDULER_IMAGE} --build-arg ARCH=$(ARCH) --build-arg VERSION=$(VERSION) --build-arg sig_upstream=$(UPSTREAM) --build-arg k8s_upstream=$(UPSTREAM_K8S) .
 
 push-sidecar:
 	$(DOCKER) push $(REGISTRY)/$(SIDECAR_IMAGE):$(TAG) --all-tags
 
-push-controller:
-	$(DOCKER) push $(REGISTRY)/$(CONTROLLER_IMAGE):$(TAG) --all-tags
+build-sidecar: 
+	make -C ./src LOCAL_REGISTRY=${REGISTRY} LOCAL_IMAGE=${SIDECAR_IMAGE}
 
 push: push-sidecar push-controller

@@ -54,8 +54,8 @@ spec:
     spec:
       serviceAccountName: {{ .Values.scheduler.name }}
       containers:
-      - image: {{ .Values.scheduler.sidecarimage }}
-        imagePullPolicy: {{ .Values.scheduler.sidecarPullPolicy }}
+      - image: {{ .Values.sidecar.image }}
+        imagePullPolicy: {{ .Values.sidecar.pullPolicy }}
         command:
         - /go/src/fluence/bin/server
         - --policy={{ .Values.scheduler.policy }}
