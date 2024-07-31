@@ -10,6 +10,16 @@ SIDECAR_IMAGE ?= fluence-sidecar:latest
 CONTROLLER_IMAGE ?= fluence-controller
 SCHEDULER_IMAGE ?= fluence
 
+# Deprecated from the upstream repository July 27, 2024
+RELEASE_VERSION?=v$(shell date +%Y%m%d)-$(shell git describe --tags --match "v*")
+PLATFORMS ?= linux/amd64
+BUILDER ?= docker
+
+# We match this to the fluence build (see src/build/scheduler/Dockerfile)
+GO_VERSION ?= "1.21.9"
+GO_BASE_IMAGE?=golang:$(GO_VERSION)
+DISTROLESS_BASE_IMAGE?=gcr.io/distroless/static:nonroot
+
 .PHONY: all build build-sidecar clone update push push-sidecar push-controller
 
 all: prepare build-sidecar build
@@ -45,7 +55,10 @@ prepare: clone
 	cp sig-scheduler-plugins/cmd/controller/app/server.go $(CLONE_UPSTREAM)/cmd/controller/app/server.go
 
 build: prepare
-	REGISTRY=${REGISTRY} IMAGE=${SCHEDULER_IMAGE} CONTROLLER_IMAGE=${CONTROLLER_IMAGE} $(BASH) $(CLONE_UPSTREAM)/hack/build-images.sh
+	BUILDER=${BUILDER} PLATFORMS=${PLATFORMS} REGISTRY=${REGISTRY} IMAGE=${SCHEDULER_IMAGE} \
+	CONTROLLER_IMAGE=${CONTROLLER_IMAGE} RELEASE_VERSION=${RELEASE_VERSION} \
+	GO_BASE_IMAGE=${GO_BASE_IMAGE} DISTROLESS_BASE_IMAGE=${DISTROLESS_BASE_IMAGE} \
+	$(BASH) $(CLONE_UPSTREAM)/hack/build-images.sh
 
 push-sidecar:
 	$(DOCKER) push $(REGISTRY)/$(SIDECAR_IMAGE):$(TAG) --all-tags
