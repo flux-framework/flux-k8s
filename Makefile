@@ -16,9 +16,9 @@ PLATFORMS ?= linux/amd64
 BUILDER ?= docker
 
 # We match this to the fluence build (see src/build/scheduler/Dockerfile)
-GO_VERSION ?= "1.21.9"
-GO_BASE_IMAGE?=golang:$(GO_VERSION)
-DISTROLESS_BASE_IMAGE?=gcr.io/distroless/static:nonroot
+GO_VERSION ?= 1.21.9
+GO_BASE_IMAGE ?= golang:${GO_VERSION}
+DISTROLESS_BASE_IMAGE ?= gcr.io/distroless/static:nonroot
 
 .PHONY: all build build-sidecar clone update push push-sidecar push-controller
 
@@ -55,6 +55,7 @@ prepare: clone
 	cp sig-scheduler-plugins/cmd/controller/app/server.go $(CLONE_UPSTREAM)/cmd/controller/app/server.go
 
 build: prepare
+	echo ${GO_BASE_IMAGE}
 	BUILDER=${BUILDER} PLATFORMS=${PLATFORMS} REGISTRY=${REGISTRY} IMAGE=${SCHEDULER_IMAGE} \
 	CONTROLLER_IMAGE=${CONTROLLER_IMAGE} RELEASE_VERSION=${RELEASE_VERSION} \
 	GO_BASE_IMAGE=${GO_BASE_IMAGE} DISTROLESS_BASE_IMAGE=${DISTROLESS_BASE_IMAGE} \
