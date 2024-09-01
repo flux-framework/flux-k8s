@@ -38,19 +38,19 @@ var (
 // NewMutatingWebhook allows us to keep the sidecarInjector private
 // If it's public it's exported and kubebuilder tries to add to zz_generated_deepcopy
 // and you get all kinds of terrible errors about admission.Decoder missing DeepCopyInto
-func NewMutatingWebhook(mgr manager.Manager) *fluenceWatcher {
-	return &fluenceWatcher{decoder: admission.NewDecoder(mgr.GetScheme())}
+func NewMutatingWebhook(mgr manager.Manager) fluenceWatcher {
+	return fluenceWatcher{decoder: admission.NewDecoder(mgr.GetScheme())}
 }
 
 // mutate-v1-fluence
 type fluenceWatcher struct {
-	decoder *admission.Decoder
+	decoder admission.Decoder
 }
 
 // Handle is the main handler for the webhook, which is looking for jobs and pods (in that order)
 // If a job comes in (with a pod template) first, we add the labels there first (and they will
 // not be added again).
-func (hook *fluenceWatcher) Handle(ctx context.Context, req admission.Request) admission.Response {
+func (hook fluenceWatcher) Handle(ctx context.Context, req admission.Request) admission.Response {
 
 	logger.Info("Running webhook handle, determining pod wrapper abstraction...")
 
@@ -145,7 +145,7 @@ func (hook *fluenceWatcher) Handle(ctx context.Context, req admission.Request) a
 }
 
 // Default is the expected entrypoint for a webhook...
-func (hook *fluenceWatcher) Default(ctx context.Context, obj runtime.Object) error {
+func (hook fluenceWatcher) Default(ctx context.Context, obj runtime.Object) error {
 
 	switch obj.(type) {
 	case *batchv1.Job:
@@ -179,7 +179,7 @@ func (hook *fluenceWatcher) Default(ctx context.Context, obj runtime.Object) err
 // Note that we need to do similar for Job.
 // A pod without a job wrapper, and without metadata is a group
 // of size 1.
-func (hook *fluenceWatcher) EnsureGroup(pod *corev1.Pod) error {
+func (hook fluenceWatcher) EnsureGroup(pod *corev1.Pod) error {
 
 	// Add labels if we don't have anything. Everything is a group!
 	if pod.Labels == nil {
@@ -221,7 +221,7 @@ func getJobLabel(job *batchv1.Job, labelName, defaultLabel string) string {
 // EnsureGroupOnJob looks for fluence labels (size and name) on both the job
 // and the pod template. We ultimately put on the pod, the lowest level unit.
 // Since we have the size of the job (parallelism) we can use that for the size
-func (a *fluenceWatcher) EnsureGroupOnJob(job *batchv1.Job) error {
+func (a fluenceWatcher) EnsureGroupOnJob(job *batchv1.Job) error {
 
 	// Be forgiving - allow the person to specify it on the job directly or on the Podtemplate
 	// We will ultimately put the metadata on the Pod.
@@ -251,7 +251,7 @@ func (a *fluenceWatcher) EnsureGroupOnJob(job *batchv1.Job) error {
 }
 
 // EnsureGroupStatefulSet creates a PodGroup for a StatefulSet
-func (hook *fluenceWatcher) EnsureGroupStatefulSet(set *appsv1.StatefulSet) error {
+func (hook fluenceWatcher) EnsureGroupStatefulSet(set *appsv1.StatefulSet) error {
 
 	// StatefulSet requires on top level explicitly
 	if set.Labels == nil {
@@ -279,7 +279,7 @@ func (hook *fluenceWatcher) EnsureGroupStatefulSet(set *appsv1.StatefulSet) erro
 }
 
 // EnsureGroupStatefulSet creates a PodGroup for a StatefulSet
-func (a *fluenceWatcher) EnsureGroupReplicaSet(set *appsv1.ReplicaSet) error {
+func (a fluenceWatcher) EnsureGroupReplicaSet(set *appsv1.ReplicaSet) error {
 
 	// StatefulSet requires on top level explicitly
 	if set.Labels == nil {
@@ -308,7 +308,7 @@ func (a *fluenceWatcher) EnsureGroupReplicaSet(set *appsv1.ReplicaSet) error {
 
 // EnsureGroupDeployment creates a PodGroup for a Deployment
 // This is redundant, can refactor later
-func (a *fluenceWatcher) EnsureGroupDeployment(d *appsv1.Deployment) error {
+func (a fluenceWatcher) EnsureGroupDeployment(d *appsv1.Deployment) error {
 
 	// StatefulSet requires on top level explicitly
 	if d.Labels == nil {
