@@ -67,7 +67,7 @@ spec:
           - containerPort: {{ .Values.scheduler.port }}
             hostPort: {{ .Values.scheduler.port }}{{ end }}
       - command:
-        - /kube-scheduler
+        - /bin/kube-scheduler
         - --config=/etc/kubernetes/scheduler-config.yaml
         - -v={{ .Values.scheduler.loggingLevel }}
         image: {{ .Values.scheduler.image }}
