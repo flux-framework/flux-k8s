@@ -16,7 +16,7 @@ PLATFORMS ?= linux/amd64
 BUILDER ?= docker
 
 # We match this to the fluence build (see src/build/scheduler/Dockerfile)
-GO_VERSION ?= 1.21.9
+GO_VERSION ?= 1.22.0
 GO_BASE_IMAGE ?= golang:${GO_VERSION}
 DISTROLESS_BASE_IMAGE ?= gcr.io/distroless/static:nonroot
 
@@ -54,12 +54,20 @@ prepare: clone
 	cp sig-scheduler-plugins/apis/scheduling/v1alpha1/*.go $(CLONE_UPSTREAM)/apis/scheduling/v1alpha1/
 	cp sig-scheduler-plugins/cmd/controller/app/server.go $(CLONE_UPSTREAM)/cmd/controller/app/server.go
 
+# This logic was moved from upstream/hack/build-images.sh - too much changing logic
+# and became hard to maintain
 build: prepare
 	echo ${GO_BASE_IMAGE}
-	BUILDER=${BUILDER} PLATFORMS=${PLATFORMS} REGISTRY=${REGISTRY} IMAGE=${SCHEDULER_IMAGE} \
-	CONTROLLER_IMAGE=${CONTROLLER_IMAGE} RELEASE_VERSION=${RELEASE_VERSION} \
-	GO_BASE_IMAGE=${GO_BASE_IMAGE} DISTROLESS_BASE_IMAGE=${DISTROLESS_BASE_IMAGE} \
-	$(BASH) $(CLONE_UPSTREAM)/hack/build-images.sh
+
+	docker build -f $(CLONE_UPSTREAM)/build/scheduler/Dockerfile --build-arg RELEASE_VERSION=${RELEASE_VERSION} \
+	--build-arg GO_BASE_IMAGE=${GO_BASE_IMAGE} \
+	--build-arg DISTROLESS_BASE_IMAGE=${DISTROLESS_BASE_IMAGE} \
+	--build-arg CGO_ENABLED=0 -t ${REGISTRY}/${SCHEDULER_IMAGE} $(CLONE_UPSTREAM)
+
+	docker build -f $(CLONE_UPSTREAM)/build/controller/Dockerfile --build-arg RELEASE_VERSION=${RELEASE_VERSION} \
+	--build-arg GO_BASE_IMAGE=${GO_BASE_IMAGE} \
+	--build-arg DISTROLESS_BASE_IMAGE=${DISTROLESS_BASE_IMAGE} \
+	--build-arg CGO_ENABLED=0 -t ${REGISTRY}/${CONTROLLER_IMAGE} $(CLONE_UPSTREAM)
 
 push-sidecar:
 	$(DOCKER) push $(REGISTRY)/$(SIDECAR_IMAGE):$(TAG) --all-tags
