@@ -55,7 +55,7 @@ default_job_pod=$(kubectl get pods --selector=job-name=default-job -o json | jq 
 echo
 echo "Fluence job pod is ${fluence_job_pod}"
 echo "Default job pod is ${default_job_pod}"
-sleep 10
+sleep 20
 
 # Shared function to check output
 function check_output {
@@ -68,6 +68,9 @@ function check_output {
     exit 1
   fi
 }
+
+# Pods should be completed
+kubectl get pods
 
 # Get output (and show)
 default_output=$(kubectl logs ${default_job_pod})
