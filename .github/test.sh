@@ -71,6 +71,7 @@ function check_output {
 
 # Pods should be completed
 kubectl get pods
+kubectl describe pods
 
 # Get output (and show)
 default_output=$(kubectl logs ${default_job_pod})
