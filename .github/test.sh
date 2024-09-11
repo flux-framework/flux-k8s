@@ -22,7 +22,6 @@ helm install \
   --set controller.pullPolicy=Never \
   --set scheduler.pullPolicy=Never \
   --set scheduler.sidecarPullPolicy=Never \
-  --set scheduler.httpScheme=HTTP \
     schedscheduler-plugins as-a-second-scheduler/
 
 # These containers should already be loaded into minikube
@@ -91,6 +90,11 @@ kubectl delete -f default-job.yaml
 echo
 kubectl apply -f fluence-job.yaml
 sleep 10
+
+# View logs again
+echo
+echo "⭐️ kubectl logs ${fluence_pod} -c sidecar"
+kubectl logs ${fluence_pod} -c sidecar
 
 fluence_job_pod=$(kubectl get pods --selector=job-name=fluence-job -o json | jq -r .items[0].metadata.name)
 echo "Fluence job pod is ${fluence_job_pod}"
