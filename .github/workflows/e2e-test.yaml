@@ -128,8 +128,8 @@ jobs:
       uses: helm/kind-action@v1.5.0
       with:
         cluster_name: kind
-        kubectl_version: v1.28.2
-        version: v0.20.0
+        kubectl_version: v1.30.3
+        version: v0.23.0
         config: ./.github/test-kind-config.yaml
         
     - name: Load Docker Containers into Kind
