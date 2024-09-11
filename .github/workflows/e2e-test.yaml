@@ -145,7 +145,7 @@ jobs:
 
     - name: Install Cert Manager
       run: |
-        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.1/cert-manager.yaml
+        kubectl apply -f kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.3/cert-manager.yaml
         sleep 10
 
     - name: Test Fluence
