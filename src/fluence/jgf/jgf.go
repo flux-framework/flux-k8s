@@ -100,7 +100,7 @@ func (g *FluxJGF) MakeEdge(source string, target string, contains string) {
 		Source: source,
 		Target: target,
 		Metadata: edgeMetadata{
-			Name: map[string]string{containmentKey: contains},
+			Subsystem: containmentKey,
 		},
 	}
 	g.Graph.Edges = append(g.Graph.Edges, newedge)
