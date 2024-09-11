@@ -45,15 +45,12 @@ kubectl logs ${fluence_pod} -c scheduler-plugins-scheduler
 cd ${here}/examples/test_example
 
 # Apply both example jobs
-kubectl apply -f fluence-job.yaml
 kubectl apply -f default-job.yaml
 
 # Get them based on associated job
-fluence_job_pod=$(kubectl get pods --selector=job-name=fluence-job -o json | jq -r .items[0].metadata.name)
 default_job_pod=$(kubectl get pods --selector=job-name=default-job -o json | jq -r .items[0].metadata.name)
 
 echo
-echo "Fluence job pod is ${fluence_job_pod}"
 echo "Default job pod is ${default_job_pod}"
 sleep 20
 
@@ -80,6 +77,22 @@ echo
 echo "Default scheduler pod output: ${default_output}"
 echo "                Scheduled by: ${default_scheduled_by}"
 
+check_output 'check-default-scheduled-by' "${default_scheduled_by}" "default-scheduler"
+check_output 'check-default-output' "${default_output}" "not potato"
+
+# And the second should be the default scheduler, but reportingComponent is empty and we see the
+# result in the source -> component
+reported_by=$(kubectl events --for pod/${default_job_pod} -o json  | jq -c '[ .items[] | select( .reason | contains("Scheduled")) ]' | jq -r .[0].source.component)
+check_output 'reported-by-default' "${reported_by}" "default-scheduler"
+
+# Now delete default, schedule fluence
+kubectl delete -f default-job.yaml
+echo
+kubectl apply -f fluence-job.yaml
+sleep 10
+
+fluence_job_pod=$(kubectl get pods --selector=job-name=fluence-job -o json | jq -r .items[0].metadata.name)
+echo "Fluence job pod is ${fluence_job_pod}"
 fluence_output=$(kubectl logs ${fluence_job_pod})
 fluence_scheduled_by=$(kubectl get pod ${fluence_job_pod} -o json | jq -r .spec.schedulerName)
 echo
@@ -88,16 +101,9 @@ echo "                Scheduled by: ${fluence_scheduled_by}"
 
 # Check output explicitly
 check_output 'check-fluence-output' "${fluence_output}" "potato"
-check_output 'check-default-output' "${default_output}" "not potato"
-check_output 'check-default-scheduled-by' "${default_scheduled_by}" "default-scheduler"
 check_output 'check-fluence-scheduled-by' "${fluence_scheduled_by}" "fluence"
 
 # But events tell us actually what happened, let's parse throught them and find our pods
 # This tells us the Event -> reason "Scheduled" and who it was reported by.
 reported_by=$(kubectl events --for pod/${fluence_job_pod} -o json  | jq -c '[ .items[] | select( .reason | contains("Scheduled")) ]' | jq -r .[0].reportingComponent)
 check_output 'reported-by-fluence' "${reported_by}" "fluence"
-
-# And the second should be the default scheduler, but reportingComponent is empty and we see the
-# result in the source -> component
-reported_by=$(kubectl events --for pod/${default_job_pod} -o json  | jq -c '[ .items[] | select( .reason | contains("Scheduled")) ]' | jq -r .[0].source.component)
-check_output 'reported-by-default' "${reported_by}" "default-scheduler"
