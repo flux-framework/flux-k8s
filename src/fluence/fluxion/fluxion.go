@@ -34,6 +34,7 @@ func (fluxion *Fluxion) InitFluxion(policy string, label string) {
 		klog.Error("Error reading JGF")
 		return
 	}
+	klog.Infof("[Fluence] JGF: %s", string(jgf))
 
 	p := "{}"
 	if policy != "" {
