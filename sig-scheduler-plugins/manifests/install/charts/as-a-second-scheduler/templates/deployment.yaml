@@ -76,14 +76,14 @@ spec:
           httpGet:
             path: /healthz
             port: 10259
-            scheme: HTTPS
+            scheme: {{ .Values.scheduler.httpScheme }}
           initialDelaySeconds: 15
         name: scheduler-plugins-scheduler
         readinessProbe:
           httpGet:
             path: /healthz
             port: 10259
-            scheme: HTTPS
+            scheme: {{ .Values.scheduler.httpScheme }}
         resources:
           requests:
             cpu: '0.1'

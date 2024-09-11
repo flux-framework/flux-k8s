@@ -12,6 +12,7 @@ scheduler:
   pullPolicy: Always
   sidecarPullPolicy: Always
   loggingLevel: "9"
+  httpScheme: HTTPS
 
   # Port is for GRPC, and enabling the external service will also
   # create the service and ingress to it, along with adding

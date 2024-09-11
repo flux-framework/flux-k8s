@@ -22,6 +22,7 @@ helm install \
   --set controller.pullPolicy=Never \
   --set scheduler.pullPolicy=Never \
   --set scheduler.sidecarPullPolicy=Never \
+  --set scheduler.httpScheme=HTTP \
     schedscheduler-plugins as-a-second-scheduler/
 
 # These containers should already be loaded into minikube
