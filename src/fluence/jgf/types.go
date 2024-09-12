@@ -33,7 +33,7 @@ type edge struct {
 }
 
 type edgeMetadata struct {
-	Name map[string]string `json:"name,omitempty"`
+	Subsystem string `json:"subsystem,omitempty"`
 }
 
 type nodeMetadata struct {
