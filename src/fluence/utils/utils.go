@@ -258,7 +258,6 @@ func computeTotalRequests(podList *corev1.PodList) (total map[corev1.ResourceNam
 
 type allocation struct {
 	Type      string
-	Name      string
 	Basename  string
 	CoreCount int
 }
@@ -292,7 +291,6 @@ func ParseAllocResult(allocated, podName string) []allocation {
 		if metadata["type"].(string) == jgf.NodeType {
 			result = append(result, allocation{
 				Type:      metadata["type"].(string),
-				Name:      metadata["name"].(string),
 				Basename:  metadata["basename"].(string),
 				CoreCount: corecount,
 			})
@@ -303,9 +301,9 @@ func ParseAllocResult(allocated, podName string) []allocation {
 	}
 	fmt.Printf("Final node result for %s\n", podName)
 	for i, alloc := range result {
-		fmt.Printf("Node %d: %s\n", i, alloc.Name)
-		fmt.Printf("  Type: %s\n  Name: %s\n  Basename: %s\n  CoreCount: %d\n",
-			alloc.Type, alloc.Name, alloc.Basename, alloc.CoreCount)
+		fmt.Printf("Node %d: %s\n", i, alloc.Basename)
+		fmt.Printf("  Type: %s\n  Basename: %s\n  CoreCount: %d\n",
+			alloc.Type, alloc.Basename, alloc.CoreCount)
 
 	}
 	return result
