@@ -37,11 +37,13 @@ prepare: clone
 	# These are entirely new directory structures
 	rm -rf $(CLONE_UPSTREAM)/pkg/fluence
 	rm -rf $(CLONE_UPSTREAM)/pkg/logger
+	rm -rf $(CLONE_UPSTREAM)/build/scheduler
 	# rm -rf $(CLONE_UPSTREAM)/cmd/app
 	rm -rf $(CLONE_UPSTREAM)/pkg/controllers/podgroup_controller.go
 	rm -rf $(CLONE_UPSTREAM)/cmd/controller/app/server.go
 	cp -R sig-scheduler-plugins/pkg/logger $(CLONE_UPSTREAM)/pkg/logger
 	cp -R sig-scheduler-plugins/pkg/fluence $(CLONE_UPSTREAM)/pkg/fluence
+	cp -R sig-scheduler-plugins/build/scheduler $(CLONE_UPSTREAM)/build/scheduler
 	cp -R sig-scheduler-plugins/pkg/controllers/* $(CLONE_UPSTREAM)/pkg/controllers/
 	# This is the one exception not from sig-scheduler-plugins because it is needed in both spots
 	cp -R src/fluence/fluxcli-grpc $(CLONE_UPSTREAM)/pkg/fluence/fluxcli-grpc
