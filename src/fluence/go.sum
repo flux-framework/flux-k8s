@@ -98,8 +98,8 @@ github.com/exponent-io/jsonpath v0.0.0-20151013193312-d6023ce2651d/go.mod h1:ZZM
 github.com/fatih/camelcase v1.0.0/go.mod h1:yN2Sb0lFhZJUdVvtELVWefmrXpuZESvPmqwoZc+/fpc=
 github.com/fatih/color v1.7.0/go.mod h1:Zm6kSWBoL9eyXnKyktHP6abPY2pDugNf5KwzbycvMj4=
 github.com/felixge/httpsnoop v1.0.1/go.mod h1:m8KPJKqk1gH5J9DgRY2ASl2lWCfGKXixSwevea8zH2U=
-github.com/flux-framework/fluxion-go v0.32.1-0.20240420052153-909523c84ca2 h1:Yz/vVX0XfB2q51ZLh2p8YI5vphvv0rZF4PqtKPscvsY=
-github.com/flux-framework/fluxion-go v0.32.1-0.20240420052153-909523c84ca2/go.mod h1:jA5+kOSLxchFzixzYEvMAGjkXB5yszO/HxUwdhX/5/U=
+github.com/flux-framework/fluxion-go v0.39.0 h1:f68CTxHouyOvjfgu5YKYFHQ405vxtdSlG8crPph8+DU=
+github.com/flux-framework/fluxion-go v0.39.0/go.mod h1:jA5+kOSLxchFzixzYEvMAGjkXB5yszO/HxUwdhX/5/U=
 github.com/form3tech-oss/jwt-go v3.2.2+incompatible/go.mod h1:pbq4aXjuKjdthFRnoDwaVPLA+WlJuPGy+QneDUgJi2k=
 github.com/form3tech-oss/jwt-go v3.2.3+incompatible/go.mod h1:pbq4aXjuKjdthFRnoDwaVPLA+WlJuPGy+QneDUgJi2k=
 github.com/fsnotify/fsnotify v1.4.7/go.mod h1:jwhsz4b93w/PPRr/qN1Yymfu8t87LnFCMoQvtojpjFo=
