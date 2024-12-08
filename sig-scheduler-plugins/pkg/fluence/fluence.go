@@ -140,14 +140,15 @@ func (fluence *Fluence) Name() string {
 
 // Fluence has added delete, although I wonder if update includes that signal
 // and it's redundant?
-func (fluence *Fluence) EventsToRegister() []framework.ClusterEventWithHint {
+func (fluence *Fluence) EventsToRegister(_ context.Context) ([]framework.ClusterEventWithHint, error) {
 	// To register a custom event, follow the naming convention at:
-	// https://git.k8s.io/kubernetes/pkg/scheduler/eventhandlers.go#L403-L410
+	// https://github.com/kubernetes/kubernetes/pull/101394
+	// Please follow: eventhandlers.go#L403-L410
 	podGroupGVK := fmt.Sprintf("podgroups.v1alpha1.%v", scheduling.GroupName)
 	return []framework.ClusterEventWithHint{
 		{Event: framework.ClusterEvent{Resource: framework.Pod, ActionType: framework.Add | framework.Delete}},
 		{Event: framework.ClusterEvent{Resource: framework.GVK(podGroupGVK), ActionType: framework.Add | framework.Update | framework.Delete}},
-	}
+	}, nil
 }
 
 // TODO we need to account for affinity here
