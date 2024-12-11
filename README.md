@@ -104,7 +104,7 @@ We provide a set of pre-build containers [alongside the repository](https://gith
 that you can easily use to deploy Fluence right away! You'll first need to install the certificate manager:
 
 ```bash
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.1/cert-manager.yaml
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
 ```
 
 And then clone the proper helm charts, and then install to your cluster. We provide helper commands to do that.
@@ -177,7 +177,7 @@ kind create cluster --config ./examples/kind-config.yaml
 And again install the certificate manager:
 
 ```bash
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.1/cert-manager.yaml
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
 ```
 
 **Important** if you are developing or testing fluence, note that custom scheduler plugins don't seem to work out of the box with MiniKube (but everything works with kind). Likely there are extensions or similar that need to be configured with MiniKube (that we have not looked into).
