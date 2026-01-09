@@ -1,6 +1,6 @@
 module github.com/flux-framework/flux-k8s/flux-plugin/fluence
 
-go 1.22
+go 1.24
 
 require (
 	github.com/flux-framework/fluxion-go v0.39.0

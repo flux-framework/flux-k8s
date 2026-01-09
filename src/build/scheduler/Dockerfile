@@ -2,7 +2,7 @@ FROM fluxrm/flux-sched:jammy
 
 USER root
 ENV DEBIAN_FRONTEND=noninteractive
-ENV GO_VERSION=1.22.0
+ENV GO_VERSION=1.24.0
 
 RUN apt-get update && apt-get clean -y && apt -y autoremove
 

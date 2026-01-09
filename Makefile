@@ -16,7 +16,7 @@ PLATFORMS ?= linux/amd64
 BUILDER ?= docker
 
 # We match this to the fluence build (see src/build/scheduler/Dockerfile)
-GO_VERSION ?= 1.22.0
+GO_VERSION ?= 1.24.0
 GO_BASE_IMAGE ?= golang:${GO_VERSION}
 DISTROLESS_BASE_IMAGE ?= gcr.io/distroless/static:nonroot
 
