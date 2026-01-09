@@ -1,7 +1,7 @@
 name: fluence build test
 
 on:
-  pull_request: []
+  pull_request: {}
   # Test on demand (dispatch) or once a week, sunday
   # We combine the builds into one job to simplify not needing to share
   # containers between jobs. We also don't want to push unless the tests pass.
