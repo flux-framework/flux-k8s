@@ -5,7 +5,7 @@ to this project, please refer to our [Contributing Guide](https://flux-framework
 ## Current Maintainers
 
 | Maintainer       | GitHub ID                                             | Affiliation                        |
-| ---------------- | ----------------------------------------------------- | ------------------------ ----------|
+| ---------------- | ----------------------------------------------------- | -----------------------------------|
 | Claudia Misale   | [cmisale](https://github.com/cmisale)                 | CoreWeave (Previously IBM Research |
 | Daniel Milroy    | [milroy](https://github.com/milroy)                   | LLNL                               |
 | Vanessa Sochat   | [vsoch](https://github.com/vsoch)                     | LLNL                               |
